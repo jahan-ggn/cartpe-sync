@@ -22,14 +22,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 app.include_router(stores_router)
 app.include_router(subscriptions_router)
 app.include_router(webhooks_router)

@@ -60,3 +60,53 @@ class Settings:
 
 
 settings = Settings()
+
+
+def _validate_settings() -> None:
+    """Fail fast on missing required environment variables"""
+    errors = []
+    warnings = []
+
+    # Required for core functionality
+    if not settings.ADMIN_API_KEY:
+        errors.append("ADMIN_API_KEY is required for admin endpoint authentication")
+    if not settings.WEBHOOK_SECRET:
+        errors.append("WEBHOOK_SECRET is required for webhook authentication")
+    if not settings.CARTPE_KEY_SOURCE:
+        errors.append("CARTPE_KEY_SOURCE is required for encrypted API access")
+
+    # Conditionally required for R2
+    if settings.R2_UPLOAD_ENABLED:
+        if not settings.R2_ACCESS_KEY_ID:
+            errors.append("R2_ACCESS_KEY_ID is required when R2_UPLOAD_ENABLED=true")
+        if not settings.R2_SECRET_ACCESS_KEY:
+            errors.append(
+                "R2_SECRET_ACCESS_KEY is required when R2_UPLOAD_ENABLED=true"
+            )
+        if not settings.R2_ENDPOINT_URL:
+            errors.append("R2_ENDPOINT_URL is required when R2_UPLOAD_ENABLED=true")
+        if not settings.R2_BUCKET_NAME:
+            errors.append("R2_BUCKET_NAME is required when R2_UPLOAD_ENABLED=true")
+        if not settings.R2_PUBLIC_URL:
+            errors.append("R2_PUBLIC_URL is required when R2_UPLOAD_ENABLED=true")
+
+    # Warn on DB defaults (may be intentional)
+    if settings.DB_HOST == "localhost":
+        warnings.append("DB_HOST is default (localhost) — ensure this is intentional")
+    if settings.DB_USER == "root":
+        warnings.append("DB_USER is default (root) — ensure this is intentional")
+    if not settings.DB_PASSWORD:
+        warnings.append("DB_PASSWORD is empty — ensure this is intentional")
+
+    for w in warnings:
+        print(f"WARNING: {w}")
+
+    if errors:
+        for e in errors:
+            print(f"ERROR: {e}")
+        raise SystemExit(
+            f"Missing required environment variables: {len(errors)} errors"
+        )
+
+
+_validate_settings()

@@ -66,7 +66,7 @@ async def register_subscription(request: SubscriptionCreateRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(e))
     except MySQLError as e:
         logger.error(f"Error registering subscription: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Database error")
 
 
 @router.post("/subscriptions/permissions")
@@ -83,7 +83,7 @@ async def add_permissions(request: PermissionAddRequest) -> dict:
         raise HTTPException(status_code=403, detail=str(e))
     except MySQLError as e:
         logger.error(f"Error adding permissions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Database error")
 
 
 @router.post("/subscriptions/credentials")
@@ -101,7 +101,7 @@ async def store_credentials(request: CredentialsRequest) -> dict:
         raise HTTPException(status_code=403, detail=str(e))
     except MySQLError as e:
         logger.error(f"Error storing credentials: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Database error")
 
 
 @router.post("/subscriptions/status")
@@ -116,7 +116,7 @@ async def get_subscription_status(request: SubscriptionStatusRequest) -> dict:
         raise HTTPException(status_code=403, detail=str(e))
     except MySQLError as e:
         logger.error(f"Error getting status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Database error")
 
 
 @router.post(

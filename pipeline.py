@@ -29,7 +29,10 @@ def scrape_and_save_categories(store_data: dict) -> tuple[str, int, bool]:
 
     scraper = CategoryScraper()
     try:
-        categories = scraper.extract_categories(store_data)
+        categories, success = scraper.extract_categories(store_data)
+        if not success:
+            logger.error(f"Failed to fetch categories for {store_name}")
+            return (store_name, 0, False)
         if not categories:
             logger.warning(f"No categories found for {store_name}")
             return (store_name, 0, False)
@@ -240,3 +243,4 @@ def run_pipeline() -> None:
         logger.info("Process interrupted by user")
     except MySQLError as e:
         logger.error(f"Fatal error in pipeline: {e}\n{traceback.format_exc()}")
+        raise

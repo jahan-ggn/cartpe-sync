@@ -1,6 +1,7 @@
 """Webhook routes"""
 
 import logging
+import secrets
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
@@ -33,17 +34,27 @@ async def push_complete_webhook(
     payload: WebhookPayload, x_webhook_secret: str = Header(None)
 ) -> dict:
     """Record a completed push reported by a buyer's site"""
-    if not x_webhook_secret or x_webhook_secret != settings.WEBHOOK_SECRET:
+    if not x_webhook_secret or not secrets.compare_digest(
+        x_webhook_secret, settings.WEBHOOK_SECRET
+    ):
         raise HTTPException(status_code=403, detail="Invalid webhook secret")
 
-    PushOrchestrator.update_last_push_at(
-        token=payload.token, buyer_domain=payload.buyer_domain
-    )
-    logger.info(
-        f"Push reported for {payload.buyer_domain} — created: {payload.summary.created}, "
-        f"stock_updated: {payload.summary.stock_updated}, "
-        f"skipped: {len(payload.summary.skip)}"
-    )
+    # Only mark as pushed on success — failed pushes should retry
+    if payload.status == "success":
+        PushOrchestrator.update_last_push_at(
+            token=payload.token, buyer_domain=payload.buyer_domain
+        )
+        logger.info(
+            f"Push succeeded for {payload.buyer_domain} — created: {payload.summary.created}, "
+            f"stock_updated: {payload.summary.stock_updated}, "
+            f"skipped: {len(payload.summary.skip)}"
+        )
+    else:
+        logger.warning(
+            f"Push reported status '{payload.status}' for {payload.buyer_domain} — "
+            f"not updating last_push_at"
+        )
+
     if payload.summary.errors:
         logger.warning(
             f"Push reported errors for {payload.buyer_domain}: "

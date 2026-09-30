@@ -25,11 +25,9 @@ def fetch_and_store_categories(store_data: dict) -> None:
     """Scrape and store categories for a newly created store"""
     scraper = CategoryScraper()
     try:
-        categories = scraper.extract_categories(store_data)
-        if categories:
+        categories, success = scraper.extract_categories(store_data)
+        if success and categories:
             CategoryService.bulk_insert_categories(categories)
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"Error fetching categories for {store_data['store_name']}: {e}")
     finally:
         scraper.close()
 
@@ -71,9 +69,9 @@ async def create_store(
 
     try:
         result = StoreService.create_store(store_data)
-    except (MySQLError, KeyError) as e:
+    except MySQLError as e:
         logger.error(f"Error creating store: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Database error")
 
     background_tasks.add_task(
         fetch_and_store_categories, {**store_data, "store_id": result["store_id"]}

@@ -18,8 +18,12 @@ class CategoryScraper:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": settings.USER_AGENT})
 
-    def extract_categories(self, store_data: dict) -> list[dict]:
-        """Extract all categories from the store's all-category endpoint"""
+    def extract_categories(self, store_data: dict) -> tuple[list[dict], bool]:
+        """Extract all categories from the store's all-category endpoint.
+
+        Returns (categories, success). `success` is False on any API/parsing
+        failure, so the caller can distinguish failure from an empty result.
+        """
         store_id = store_data["store_id"]
         store_name = store_data["store_name"]
         base_url = store_data["base_url"].rstrip("/")
@@ -38,7 +42,7 @@ class CategoryScraper:
             payload = decrypt_json(response.json())
         except Exception as e:
             logger.error(f"Error fetching categories for {store_name}: {e}")
-            return []
+            return [], False
 
         categories = [
             {
@@ -52,7 +56,7 @@ class CategoryScraper:
         ]
 
         logger.info(f"Extracted {len(categories)} categories from {store_name}")
-        return categories
+        return categories, True
 
     def close(self):
         """Close the requests session"""
