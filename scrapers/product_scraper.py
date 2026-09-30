@@ -106,7 +106,7 @@ class ProductScraper:
                 "category_id": category_id,
                 "external_product_id": str(item["id"]),
                 "product_name": product_name,
-                "product_url": f"{base_url}/{item['siteSlug']}.html",
+                "product_url": f"{base_url}/product-detail/{item['siteSlug']}",
                 "site_slug": item.get("siteSlug"),
                 "image_url": image_url,
                 "source_image_url": image_url,

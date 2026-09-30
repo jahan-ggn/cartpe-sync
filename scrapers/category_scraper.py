@@ -46,7 +46,7 @@ class CategoryScraper:
                 "external_category_id": str(cat["category_id"]),
                 "category_name": cat["category_name"],
                 "category_slug": cat["slug"],
-                "category_url": f"{base_url}/{cat['slug']}.html",
+                "category_url": f"{base_url}/{cat['slug']}",
             }
             for cat in payload.get("data", {}).get("categories", [])
         ]

@@ -33,8 +33,6 @@ FIELD_NAMES = [
     "updated_at",
     "has_variants",
     "variants",
-    "brand_id",
-    "brand_name",
     "short_description",
     "description",
     "attributes",
@@ -88,7 +86,6 @@ class CSVService:
                         p.current_price, p.original_price, p.stock_status, p.is_active,
                         p.last_synced_at, p.created_at, p.updated_at,
                         p.has_variants, p.variants,
-                        p.brand_id, b.brand_name,
                         p.short_description, p.description, p.attributes,
                         GROUP_CONCAT(DISTINCT c.category_id
                             ORDER BY c.category_id SEPARATOR ', ') as categories
