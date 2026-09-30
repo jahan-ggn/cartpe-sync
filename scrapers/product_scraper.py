@@ -268,11 +268,9 @@ class ProductScraper:
 
         return all_products, complete
 
-    def _needs_gallery(self, product: dict, store_id: int) -> bool:
+    def _needs_gallery(self, product: dict, existing_assets: dict[str, dict]) -> bool:
         """Whether a product is new, changed, or still missing its gallery"""
-        existing = self.product_service.get_existing_product_assets(
-            store_id, product["external_product_id"]
-        )
+        existing = existing_assets.get(product["external_product_id"])
         if existing is None or existing["product_images"] is None:
             return True
         new_filename = (product.get("image_url") or "").split("/")[-1]
@@ -282,7 +280,13 @@ class ProductScraper:
         self, all_products: list[dict], store_id: int, base_url: str, host: str
     ) -> None:
         """Fill `product_images` from the detail endpoint for new or changed products"""
-        pending = [p for p in all_products if self._needs_gallery(p, store_id)]
+        # Batch-fetch existing assets to avoid N+1 queries
+        external_ids = [p["external_product_id"] for p in all_products]
+        existing_assets = self.product_service.get_existing_assets_batch(
+            store_id, external_ids
+        )
+
+        pending = [p for p in all_products if self._needs_gallery(p, existing_assets)]
         if not pending:
             return
 

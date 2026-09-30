@@ -1,9 +1,10 @@
 """Cron control routes"""
 
 import logging
+import re
 import subprocess
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from api.deps import require_admin
@@ -17,6 +18,11 @@ CRON_COMMAND = (
     f"cd {settings.BASE_DIR} && {settings.BASE_DIR}/venv/bin/python main.py "
     f">> {settings.BASE_DIR}/logs/cron.log 2>&1"
 )
+CRON_FIELD = r"[\d*,/-]+"
+CRON_PATTERN = re.compile(
+    rf"^{CRON_FIELD}\s+{CRON_FIELD}\s+{CRON_FIELD}\s+{CRON_FIELD}\s+{CRON_FIELD}$"
+)
+CRONTAB_BACKUP = settings.BASE_DIR / "logs" / "crontab.backup"
 
 
 def _get_crontab() -> str:
@@ -52,6 +58,20 @@ def _parse_cron_line(crontab: str) -> str | None:
     return None
 
 
+def _validate_cron_schedule(schedule: str) -> bool:
+    """Check that a cron schedule has 5 valid fields"""
+    return bool(CRON_PATTERN.match(schedule.strip()))
+
+
+def _backup_crontab(content: str) -> None:
+    """Save current crontab before replacing it"""
+    try:
+        CRONTAB_BACKUP.parent.mkdir(parents=True, exist_ok=True)
+        CRONTAB_BACKUP.write_text(content)
+    except OSError as e:
+        logger.warning(f"Could not backup crontab: {e}")
+
+
 class CronUpdateRequest(BaseModel):
     schedule: str  # e.g. "0 23 * * *"
 
@@ -72,11 +92,20 @@ def get_cron_status() -> dict:
 @router.post("/cron/update", dependencies=[Depends(require_admin)])
 def update_cron_schedule(request: CronUpdateRequest) -> dict:
     """Set the scraper's schedule"""
+    if not _validate_cron_schedule(request.schedule):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid cron schedule. Expected 5 fields: minute hour day month weekday",
+        )
+
+    current = _get_crontab()
+    _backup_crontab(current)
+
     new_line = f"{request.schedule} {CRON_COMMAND}"
     new_lines = []
     updated = False
 
-    for line in _get_crontab().splitlines():
+    for line in current.splitlines():
         if CRON_COMMAND in line:
             new_lines.append(new_line)
             updated = True
@@ -93,10 +122,13 @@ def update_cron_schedule(request: CronUpdateRequest) -> dict:
 @router.post("/cron/toggle", dependencies=[Depends(require_admin)])
 def toggle_cron() -> dict:
     """Enable or disable the scraper's schedule"""
+    current = _get_crontab()
+    _backup_crontab(current)
+
     new_lines = []
     toggled_to = None
 
-    for line in _get_crontab().splitlines():
+    for line in current.splitlines():
         if CRON_COMMAND in line:
             if line.strip().startswith("#"):
                 line = line.lstrip("#").strip()

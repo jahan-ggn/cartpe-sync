@@ -3,7 +3,6 @@
 import json
 import logging
 import time
-from datetime import datetime
 from functools import wraps
 
 from mysql.connector import Error as MySQLError
@@ -261,8 +260,8 @@ class ProductService:
                     if product_id and prod.get("category_id"):
                         cursor.execute(
                             """DELETE FROM product_categories
-                            WHERE product_id = %s AND category_id = %s""",
-                            (product_id, prod["category_id"]),
+                            WHERE product_id = %s""",
+                            (product_id,),
                         )
                         cursor.execute(
                             """INSERT IGNORE INTO product_categories (product_id, category_id)
@@ -331,3 +330,29 @@ class ProductService:
         except MySQLError as e:
             logger.error(f"Error fetching product assets: {e}")
             return None
+
+    @staticmethod
+    def get_existing_assets_batch(
+        store_id: int, external_product_ids: list[str]
+    ) -> dict[str, dict]:
+        """Get image_url and product_images for multiple products in one query.
+
+        Returns {external_product_id: {"image_url": ..., "product_images": ...}}
+        """
+        if not external_product_ids:
+            return {}
+
+        placeholders = ", ".join(["%s"] * len(external_product_ids))
+        query = f"""
+            SELECT external_product_id, image_url, product_images
+            FROM products
+            WHERE store_id = %s AND external_product_id IN ({placeholders})
+        """
+        try:
+            rows = DatabaseManager.execute_query(
+                query, (store_id, *external_product_ids), fetch=True
+            )
+            return {row["external_product_id"]: row for row in rows}
+        except MySQLError as e:
+            logger.error(f"Error batch fetching product assets: {e}")
+            return {}
