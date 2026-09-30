@@ -1,0 +1,25 @@
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Logs and outputs
+logs/
+*.log
+csv_exports/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+*.sql
