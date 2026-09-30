@@ -86,16 +86,27 @@ def scrape_category(store_data: dict, category: dict) -> tuple[str, dict | None]
 
     scraper = ProductScraper(product_service=ProductService)
     try:
-        products = scraper.extract_products(store_data, category)
+        products, complete = scraper.extract_products(store_data, category)
 
         if not products:
+            if complete:
+                # Genuinely empty category: deactivate any stale rows
+                ProductService.mark_category_products_inactive(
+                    store_id, category["category_id"]
+                )
             logger.info(f"No products found for {category_name}")
             return (category_name, None)
 
-        ProductService.mark_category_products_inactive(
-            store_id, category["category_id"]
+        mark_inactive = (store_id, category["category_id"]) if complete else None
+        if not complete:
+            logger.warning(
+                f"Incomplete scrape for {category_name}: upserting collected "
+                f"products but skipping deactivation"
+            )
+
+        metrics = ProductService.bulk_upsert_products(
+            products, mark_inactive=mark_inactive
         )
-        metrics = ProductService.bulk_upsert_products(products)
 
         logger.info(
             f"Saved {metrics['total']} products for {category_name} "

@@ -130,8 +130,14 @@ class ProductScraper:
             logger.warning(f"Skipping malformed product {item.get('id')}: {e}")
             return None
 
-    def extract_products(self, store_data: dict, category_data: dict) -> list[dict]:
-        """Extract all products for a category, paging until exhausted"""
+    def extract_products(
+        self, store_data: dict, category_data: dict
+    ) -> tuple[list[dict], bool]:
+        """Extract all products for a category, paging until exhausted.
+
+        Returns (products, complete). `complete` is True only when pagination
+        ended normally and the collected unique IDs match the reported total.
+        """
         store_id = store_data["store_id"]
         store_name = store_data["store_name"]
         base_url = store_data["base_url"].rstrip("/")
@@ -143,7 +149,10 @@ class ProductScraper:
 
         api_url = f"{base_url}/api/category-products"
         all_products: list[dict] = []
+        seen_ids: set = set()
         page = 1
+        complete = True
+        reported_total: int | None = None
 
         logger.info(f"Fetching products for {store_name} - {category_name}")
 
@@ -171,6 +180,7 @@ class ProductScraper:
                     f"Error fetching products for {store_name} - {category_name} "
                     f"(page {page}): {e}"
                 )
+                complete = False
                 break
 
             if not payload.get("status"):
@@ -178,11 +188,46 @@ class ProductScraper:
                     f"API reported failure for {category_name} (page {page}): "
                     f"{payload.get('message')}"
                 )
+                complete = False
                 break
 
-            items = payload.get("data") or []
+            items = payload.get("data")
+            if not isinstance(items, list):
+                logger.warning(
+                    f"Malformed data for {category_name} (page {page}): "
+                    f"expected list, got {type(items).__name__}"
+                )
+                complete = False
+                break
+
+            has_more = payload.get("has_more_pages")
+            total = payload.get("total")
+            if has_more is None or total is None:
+                logger.warning(
+                    f"Missing pagination fields for {category_name} (page {page})"
+                )
+                complete = False
+                break
+
+            if reported_total is None:
+                reported_total = total
+            elif total != reported_total:
+                logger.warning(
+                    f"Reported total changed for {category_name}: "
+                    f"{reported_total} -> {total} (page {page})"
+                )
+                complete = False
+                break
+
             if not items:
-                logger.info(f"No more products. Total pages: {page}")
+                if total == 0 and not has_more:
+                    logger.info(f"Category {category_name} is empty")
+                else:
+                    logger.warning(
+                        f"Empty page but total={total}, has_more={has_more} "
+                        f"for {category_name} (page {page})"
+                    )
+                    complete = False
                 break
 
             for item in items:
@@ -191,23 +236,37 @@ class ProductScraper:
                 )
                 if product:
                     all_products.append(product)
+                    seen_ids.add(product["external_product_id"])
+                else:
+                    logger.warning(
+                        f"Skipped a product on page {page} for {category_name}"
+                    )
+                    complete = False
 
             logger.info(f"Page {page}: parsed {len(items)} products")
 
-            if not payload.get("has_more_pages"):
+            if not has_more:
                 break
 
             page += 1
             time.sleep(settings.REQUEST_DELAY)
 
+        if complete and reported_total and seen_ids and len(seen_ids) != reported_total:
+            logger.warning(
+                f"Collected {len(seen_ids)} unique products for "
+                f"{category_name} but API reported total={reported_total}"
+            )
+            complete = False
+
         logger.info(
-            f"Total products extracted for {category_name}: {len(all_products)}"
+            f"Total products extracted for {category_name}: "
+            f"{len(all_products)} (complete={complete})"
         )
 
         if all_products and self.product_service:
             self._fetch_galleries(all_products, store_id, base_url, host)
 
-        return all_products
+        return all_products, complete
 
     def _needs_gallery(self, product: dict, store_id: int) -> bool:
         """Whether a product is new, changed, or still missing its gallery"""

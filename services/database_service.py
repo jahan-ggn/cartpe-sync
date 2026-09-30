@@ -135,8 +135,15 @@ class ProductService:
 
     @staticmethod
     @retry_on_deadlock(max_retries=3, retry_delay=1)
-    def bulk_upsert_products(products: list[dict]) -> dict:
-        """Insert or update products, returning change metrics"""
+    def bulk_upsert_products(
+        products: list[dict], mark_inactive: tuple[int, int] | None = None
+    ) -> dict:
+        """Insert or update products, returning change metrics.
+
+        If `mark_inactive` is (store_id, category_id), that category's products
+        are deactivated first, within the SAME transaction as the upsert, so
+        both commit or both roll back together.
+        """
         metrics = {"new": 0, "price_changed": 0, "stock_changed": 0, "total": 0}
         if not products:
             return metrics
@@ -190,6 +197,11 @@ class ProductService:
         try:
             with DatabaseManager.get_connection() as conn:
                 cursor = conn.cursor(dictionary=True)
+
+                if mark_inactive is not None:
+                    ProductService.mark_category_products_inactive(
+                        mark_inactive[0], mark_inactive[1], cursor=cursor
+                    )
 
                 for prod in products:
                     attributes = prod.get("attributes")
@@ -270,14 +282,26 @@ class ProductService:
             raise
 
     @staticmethod
-    def mark_category_products_inactive(store_id: int, category_id: int) -> int:
-        """Mark all products in a category as inactive, without bumping updated_at"""
+    def mark_category_products_inactive(
+        store_id: int, category_id: int, cursor=None
+    ) -> int:
+        """Mark all products in a category as inactive, without bumping updated_at.
+
+        When `cursor` is given the UPDATE runs on it (joining the caller's
+        transaction); otherwise it opens its own connection.
+        """
         query = """
             UPDATE products p
             JOIN product_categories pc ON p.id = pc.product_id
             SET p.is_active = FALSE, p.updated_at = p.updated_at
             WHERE p.store_id = %s AND pc.category_id = %s
         """
+        if cursor is not None:
+            cursor.execute(query, (store_id, category_id))
+            logger.info(
+                f"Marked {cursor.rowcount} products as inactive for category {category_id}"
+            )
+            return cursor.rowcount
         try:
             rows_affected = DatabaseManager.execute_query(
                 query, (store_id, category_id)

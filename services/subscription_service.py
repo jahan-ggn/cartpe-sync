@@ -4,10 +4,9 @@ import logging
 import uuid
 from datetime import timedelta
 
-from utils.timeutil import now
-
 from config.database import DatabaseManager
 from config.settings import settings
+from utils.timeutil import now
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ class SubscriptionService:
     def _get_active_subscription(cursor, token: str, buyer_domain: str) -> dict:
         """Resolve the newest active subscription for a domain, validating the token"""
         cursor.execute(
-            """SELECT id, token FROM api_subscriptions
+            """SELECT id, token, expires_at FROM api_subscriptions
             WHERE buyer_domain = %s AND expires_at > NOW()
             ORDER BY created_at DESC LIMIT 1""",
             (buyer_domain,),
