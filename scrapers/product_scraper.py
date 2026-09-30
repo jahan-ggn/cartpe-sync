@@ -97,6 +97,13 @@ class ProductScraper:
             if not product_name or not filename:
                 return None
 
+            site_slug = item.get("siteSlug")
+            if not site_slug:
+                logger.warning(
+                    f"Skipping {item.get('id')} ({product_name}) - siteSlug not yet generated"
+                )
+                return None
+
             has_variants, variants = self._build_variants(item.get("sizes"))
             image_url = self._image_url(filename)
 
