@@ -1,6 +1,7 @@
 """Store routes"""
 
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from mysql.connector import Error as MySQLError
@@ -15,6 +16,7 @@ router = APIRouter(prefix="/api", tags=["stores"])
 
 
 class StoreCreateRequest(BaseModel):
+    store_type: Literal["cartpe"] = "cartpe"
     store_name: str
     base_url: str
 

@@ -42,8 +42,8 @@ class StoreService:
     """Store-related database operations"""
 
     @staticmethod
-    def get_all_stores(store_type: str = "cartpe") -> list[dict]:
-        """Fetch stores, filtered by `store_type` ('cartpe' by default)"""
+    def get_all_stores(store_type: str | None = None) -> list[dict]:
+        """Fetch stores, optionally filtered by type (None returns all)"""
         if store_type:
             query = "SELECT * FROM stores WHERE store_type = %s"
             params = (store_type,)

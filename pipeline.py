@@ -51,7 +51,7 @@ def run_category_scraping() -> bool:
     logger.info("STEP 1: Category Scraping")
     logger.info("=" * 80)
 
-    stores = StoreService.get_all_stores()
+    stores = StoreService.get_all_stores("cartpe")
     if not stores:
         logger.warning("No stores found in database")
         return False
@@ -149,7 +149,7 @@ def run_product_scraping() -> bool:
     logger.info("STEP 2: Product Scraping")
     logger.info("=" * 80)
 
-    stores = StoreService.get_all_stores()
+    stores = StoreService.get_all_stores("cartpe")
     if not stores:
         logger.warning("No stores found in database")
         return False
