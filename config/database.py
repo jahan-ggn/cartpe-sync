@@ -39,6 +39,14 @@ class DatabaseManager:
                 logger.error(f"Error creating connection pool: {e}")
                 raise
 
+    @staticmethod
+    def _rollback_quietly(connection) -> None:
+        """Best-effort rollback; log but never mask the original exception"""
+        try:
+            connection.rollback()
+        except Exception:
+            logger.warning("Rollback failed", exc_info=True)
+
     @classmethod
     @contextmanager
     def get_connection(cls):
@@ -53,11 +61,12 @@ class DatabaseManager:
             connection.commit()
         except Error as e:
             if connection:
-                try:
-                    connection.rollback()
-                except Exception:
-                    pass
+                cls._rollback_quietly(connection)
             logger.error(f"Database error: {e}")
+            raise
+        except Exception:
+            if connection:
+                cls._rollback_quietly(connection)
             raise
         finally:
             if connection and connection.is_connected():

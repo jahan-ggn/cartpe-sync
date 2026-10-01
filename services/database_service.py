@@ -144,7 +144,7 @@ class ProductService:
         both commit or both roll back together.
         """
         metrics = {"new": 0, "price_changed": 0, "stock_changed": 0, "total": 0}
-        if not products:
+        if not products and mark_inactive is None:
             return metrics
 
         r2_domain = settings.R2_PUBLIC_URL.replace("https://", "").replace(

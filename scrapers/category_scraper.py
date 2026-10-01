@@ -40,6 +40,11 @@ class CategoryScraper:
             )
             response.raise_for_status()
             payload = decrypt_json(response.json())
+            if not payload.get("success"):
+                logger.warning(
+                    f"Category API reported failure for {store_name}: {payload.get('message')}"
+                )
+                return [], False
         except Exception as e:
             logger.error(f"Error fetching categories for {store_name}: {e}")
             return [], False

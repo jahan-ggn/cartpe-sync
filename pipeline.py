@@ -82,8 +82,8 @@ def run_category_scraping() -> bool:
     return failed == 0
 
 
-def scrape_category(store_data: dict, category: dict) -> tuple[str, dict | None]:
-    """Scrape every product in one category; returns (name, metrics or None)"""
+def scrape_category(store_data: dict, category: dict) -> tuple[str, dict | None, bool]:
+    """Scrape every product in one category; returns (name, metrics or None, complete)"""
     category_name = category["category_name"]
     store_id = store_data["store_id"]
 
@@ -93,12 +93,15 @@ def scrape_category(store_data: dict, category: dict) -> tuple[str, dict | None]
 
         if not products:
             if complete:
-                # Genuinely empty category: deactivate any stale rows
-                ProductService.mark_category_products_inactive(
-                    store_id, category["category_id"]
+                # Genuinely empty category: deactivate stale rows via the
+                # unified path so DB errors propagate instead of being swallowed
+                ProductService.bulk_upsert_products(
+                    [], mark_inactive=(store_id, category["category_id"])
                 )
-            logger.info(f"No products found for {category_name}")
-            return (category_name, None)
+                logger.info(f"No products found for {category_name}")
+                return (category_name, None, True)
+            logger.warning(f"Incomplete scrape for {category_name}: no products saved")
+            return (category_name, None, False)
 
         mark_inactive = (store_id, category["category_id"]) if complete else None
         if not complete:
@@ -116,11 +119,11 @@ def scrape_category(store_data: dict, category: dict) -> tuple[str, dict | None]
             f"(new: {metrics['new']}, price: {metrics['price_changed']}, "
             f"stock: {metrics['stock_changed']})"
         )
-        return (category_name, metrics)
+        return (category_name, metrics, complete)
 
     except MySQLError as e:
         logger.error(f"Error saving products for {category_name}: {e}")
-        return (category_name, None)
+        return (category_name, None, False)
     finally:
         scraper.close()
 
@@ -147,12 +150,12 @@ def scrape_store_products(store_data: dict) -> tuple[str, dict, bool]:
         ]
 
         for future in as_completed(futures):
-            category_name, metrics = future.result()
+            category_name, metrics, cat_complete = future.result()
             if metrics:
                 merge_metrics(store_metrics, metrics)
-            else:
+            if not cat_complete:
                 failed_categories += 1
-                logger.warning(f"Category produced no data: {category_name}")
+                logger.warning(f"Category incomplete or failed: {category_name}")
 
     return (store_name, store_metrics, failed_categories == 0)
 

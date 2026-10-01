@@ -76,7 +76,9 @@ class ProductScraper:
                 "in_stock": size.get("qty", 0) > 0,
             }
             for size in sizes or []
-            if isinstance(size, dict) and size.get("sizeName")
+            if isinstance(size, dict)
+            and size.get("sizeName")
+            and size.get("qty", 0) > 0
         ]
         if not entries:
             return False, None
@@ -95,19 +97,19 @@ class ProductScraper:
             product_name = item.get("productName")
             filename = item.get("image")
             if not product_name or not filename:
-                return None
+                return None, "missing_fields"
 
             site_slug = item.get("siteSlug")
             if not site_slug:
                 logger.warning(
                     f"Skipping {item.get('id')} ({product_name}) - siteSlug not yet generated"
                 )
-                return None
+                return None, "no_slug"
 
             has_variants, variants = self._build_variants(item.get("sizes"))
             image_url = self._image_url(filename)
 
-            return {
+            product = {
                 "store_id": store_id,
                 "store_name": store_name,
                 "category_id": category_id,
@@ -126,9 +128,10 @@ class ProductScraper:
                     "in_stock" if item.get("stock") == 1 else "out_of_stock"
                 ),
             }
+            return product, None
         except (AttributeError, KeyError, TypeError, ValueError) as e:
             logger.warning(f"Skipping malformed product {item.get('id')}: {e}")
-            return None
+            return None, "malformed_data"
 
     def extract_products(
         self, store_data: dict, category_data: dict
@@ -153,6 +156,7 @@ class ProductScraper:
         page = 1
         complete = True
         reported_total: int | None = None
+        skipped_slugs = 0
 
         logger.info(f"Fetching products for {store_name} - {category_name}")
 
@@ -183,7 +187,13 @@ class ProductScraper:
                 complete = False
                 break
 
-            if not payload.get("status"):
+            if not isinstance(payload, dict):
+                logger.warning(f"Malformed payload for {category_name} (page {page})")
+                complete = False
+                break
+
+            status = payload.get("status")
+            if not isinstance(status, bool) or not status:
                 logger.warning(
                     f"API reported failure for {category_name} (page {page}): "
                     f"{payload.get('message')}"
@@ -202,9 +212,14 @@ class ProductScraper:
 
             has_more = payload.get("has_more_pages")
             total = payload.get("total")
-            if has_more is None or total is None:
+            if (
+                not isinstance(has_more, bool)
+                or not isinstance(total, int)
+                or isinstance(total, bool)
+                or total < 0
+            ):
                 logger.warning(
-                    f"Missing pagination fields for {category_name} (page {page})"
+                    f"Malformed pagination fields for {category_name} (page {page})"
                 )
                 complete = False
                 break
@@ -231,16 +246,15 @@ class ProductScraper:
                 break
 
             for item in items:
-                product = self._parse_product(
+                product, reason = self._parse_product(
                     item, store_id, store_name, category_id, base_url
                 )
                 if product:
                     all_products.append(product)
                     seen_ids.add(product["external_product_id"])
+                elif reason == "no_slug":
+                    skipped_slugs += 1
                 else:
-                    logger.warning(
-                        f"Skipped a product on page {page} for {category_name}"
-                    )
                     complete = False
 
             logger.info(f"Page {page}: parsed {len(items)} products")
@@ -251,7 +265,11 @@ class ProductScraper:
             page += 1
             time.sleep(settings.REQUEST_DELAY)
 
-        if complete and reported_total and seen_ids and len(seen_ids) != reported_total:
+        if (
+            complete
+            and reported_total is not None
+            and len(seen_ids) + skipped_slugs != reported_total
+        ):
             logger.warning(
                 f"Collected {len(seen_ids)} unique products for "
                 f"{category_name} but API reported total={reported_total}"

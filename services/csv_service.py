@@ -138,7 +138,7 @@ class CSVService:
             requests.RequestException,
         ) as e:
             logger.error(
-                f"Error uploading CSV for subscription {subscription_id}: "
+                f"Error generating CSV for subscription {subscription_id}: "
                 f"{type(e).__name__}"
             )
             raise
