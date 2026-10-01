@@ -39,10 +39,12 @@ class PushOrchestrator:
                 csv_path = CSVService.generate_csv_for_subscription(subscription_id)
             except (MySQLError, OSError, ValueError) as e:
                 results["failed"] += 1
-                logger.error(f"CSV generation failed for {buyer_domain}: {e}")
+                logger.error(
+                    f"CSV generation failed for {buyer_domain}: {type(e).__name__}"
+                )
                 continue
 
-            if not csv_path:
+            if csv_path is None:
                 results["no_data"] += 1
                 logger.info(f"No data to push for {buyer_domain}")
                 continue
@@ -75,5 +77,5 @@ class PushOrchestrator:
                 )
             return True
         except MySQLError as e:
-            logger.error(f"Error updating last_push_at: {e}")
+            logger.error(f"Error updating last_push_at: {type(e).__name__}")
             return False

@@ -137,12 +137,11 @@ class CSVService:
             ValueError,
             requests.RequestException,
         ) as e:
-            # Log error type only — full exception may contain URL with credentials
             logger.error(
                 f"Error uploading CSV for subscription {subscription_id}: "
                 f"{type(e).__name__}"
             )
-            return False
+            raise
 
     @staticmethod
     def upload_csv(csv_path: str, subscription_id: int) -> bool:
@@ -182,7 +181,10 @@ class CSVService:
             ValueError,
             requests.RequestException,
         ) as e:
-            logger.error(f"Error uploading CSV for subscription {subscription_id}: {e}")
+            logger.error(
+                f"Error uploading CSV for subscription {subscription_id}: "
+                f"{type(e).__name__}"
+            )
             return False
 
     @staticmethod
