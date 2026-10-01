@@ -131,11 +131,18 @@ class CSVService:
             )
             return str(csv_path)
 
-        except (MySQLError, OSError, ValueError) as e:
+        except (
+            MySQLError,
+            OSError,
+            ValueError,
+            requests.RequestException,
+        ) as e:
+            # Log error type only — full exception may contain URL with credentials
             logger.error(
-                f"Error generating CSV for subscription {subscription_id}: {e}"
+                f"Error uploading CSV for subscription {subscription_id}: "
+                f"{type(e).__name__}"
             )
-            raise
+            return False
 
     @staticmethod
     def upload_csv(csv_path: str, subscription_id: int) -> bool:
