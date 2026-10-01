@@ -91,9 +91,14 @@ class ProductScraper:
         store_name: str,
         category_id: int,
         base_url: str,
-    ) -> dict | None:
+    ) -> tuple[dict | None, str | None]:
         """Map one API product onto the row shape the upsert expects"""
         try:
+            if not isinstance(item, dict):
+                logger.warning(
+                    f"Skipping malformed product entry: {type(item).__name__}"
+                )
+                return None, "malformed_data"
             product_name = item.get("productName")
             filename = item.get("image")
             if not product_name or not filename:
@@ -254,6 +259,7 @@ class ProductScraper:
                     seen_ids.add(product["external_product_id"])
                 elif reason == "no_slug":
                     skipped_slugs += 1
+                    complete = False
                 else:
                     complete = False
 
@@ -265,11 +271,7 @@ class ProductScraper:
             page += 1
             time.sleep(settings.REQUEST_DELAY)
 
-        if (
-            complete
-            and reported_total is not None
-            and len(seen_ids) + skipped_slugs != reported_total
-        ):
+        if complete and reported_total is not None and len(seen_ids) != reported_total:
             logger.warning(
                 f"Collected {len(seen_ids)} unique products for "
                 f"{category_name} but API reported total={reported_total}"
@@ -279,6 +281,7 @@ class ProductScraper:
         logger.info(
             f"Total products extracted for {category_name}: "
             f"{len(all_products)} (complete={complete})"
+            f"skipped_no_slug={skipped_slugs})"
         )
 
         if all_products and self.product_service:
