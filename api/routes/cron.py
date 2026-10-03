@@ -1,6 +1,7 @@
 """Cron control routes"""
 
 import logging
+import os
 import re
 import shlex
 import subprocess
@@ -28,18 +29,54 @@ CRONTAB_BACKUP = settings.BASE_DIR / "logs" / "crontab.backup"
 
 
 def _get_crontab() -> str:
-    """Return the current crontab, or an empty string if the user has none"""
-    result = subprocess.run(
-        [CRONTAB_BIN, "-l"],
-        capture_output=True,
-        text=True,
-        check=False,
+    """Return crontab text or empty if absent; raise HTTPException on failure."""
+
+    try:
+        result = subprocess.run(
+            [CRONTAB_BIN, "-l"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**os.environ, "LC_ALL": "C"},
+            timeout=10,
+            encoding="utf-8",
+        )
+    except subprocess.TimeoutExpired:
+        logger.exception("Crontab command timed out; completion is unknown")
+        raise HTTPException(
+            status_code=504,
+            detail="Cron operation timed out; check cron status before retrying",
+        ) from None
+    except UnicodeError:
+        logger.exception("Crontab command encountered a text encoding error")
+        raise HTTPException(
+            status_code=500,
+            detail="Cron configuration could not be processed as UTF-8",
+        ) from None
+    except OSError:
+        logger.exception("Could not execute crontab")
+        raise HTTPException(
+            status_code=500,
+            detail="Could not read scraper cron configuration",
+        ) from None
+
+    if result.returncode == 0:
+        return result.stdout
+
+    error = result.stderr.strip()
+
+    if result.returncode == 1 and "no crontab for" in error.lower():
+        return ""
+
+    logger.error(f"Crontab read failed with exit code {result.returncode}: {error}")
+    raise HTTPException(
+        status_code=500,
+        detail="Could not read scraper cron configuration",
     )
-    return result.stdout if result.returncode == 0 else ""
 
 
 def _set_crontab(content: str) -> None:
-    """Replace the crontab, raising if `crontab` rejects it"""
+    """Replace crontab, returning a clear API error on failure."""
     try:
         subprocess.run(
             [CRONTAB_BIN, "-"],
@@ -47,10 +84,34 @@ def _set_crontab(content: str) -> None:
             text=True,
             capture_output=True,
             check=True,
+            env={**os.environ, "LC_ALL": "C"},
+            timeout=10,
+            encoding="utf-8",
         )
+    except subprocess.TimeoutExpired:
+        logger.exception("Crontab command timed out; completion is unknown")
+        raise HTTPException(
+            status_code=504,
+            detail="Cron operation timed out; check cron status before retrying",
+        ) from None
+    except UnicodeError:
+        logger.exception("Crontab command encountered a text encoding error")
+        raise HTTPException(
+            status_code=500,
+            detail="Cron configuration could not be processed as UTF-8",
+        ) from None
     except subprocess.CalledProcessError as e:
-        logger.error(f"Failed to set crontab: {e.stderr}")
-        raise RuntimeError(f"crontab update failed: {e.stderr}") from e
+        logger.error(f"Crontab update failed: {e.stderr}")
+        raise HTTPException(
+            status_code=500,
+            detail="Could not update scraper cron configuration",
+        ) from None
+    except OSError:
+        logger.exception("Could not execute crontab")
+        raise HTTPException(
+            status_code=500,
+            detail="Could not update scraper cron configuration",
+        ) from None
 
 
 def _parse_cron_line(crontab: str) -> str | None:
@@ -67,6 +128,8 @@ def _validate_cron_schedule(schedule: str) -> bool:
 
 def _backup_crontab(content: str) -> None:
     """Save current crontab before replacing it"""
+    if not content.strip():
+        return
     try:
         CRONTAB_BACKUP.parent.mkdir(parents=True, exist_ok=True)
         CRONTAB_BACKUP.write_text(content)
