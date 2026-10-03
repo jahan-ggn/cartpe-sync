@@ -1,6 +1,7 @@
 """Subscription service for managing API subscriptions"""
 
 import logging
+import secrets
 import uuid
 from datetime import timedelta
 
@@ -26,7 +27,7 @@ class SubscriptionService:
         subscription = cursor.fetchone()
         if not subscription:
             raise ValueError(f"No active subscription found for domain: {buyer_domain}")
-        if subscription["token"] != token:
+        if not secrets.compare_digest(subscription["token"], token):
             raise ValueError("Invalid token for this domain")
         return subscription
 
