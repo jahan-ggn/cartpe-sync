@@ -120,22 +120,35 @@ async def get_subscription_status(request: SubscriptionStatusRequest) -> dict:
 
 
 @router.post(
-    "/subscriptions/push/{subscription_id}", dependencies=[Depends(require_admin)]
+    "/subscriptions/push/{subscription_id}",
+    dependencies=[Depends(require_admin)],
 )
 async def manual_push(subscription_id: int) -> dict:
-    """Manually generate and push a CSV for one subscriber"""
-    csv_path = CSVService.generate_csv_for_subscription(subscription_id)
+    """Generate and upload a CSV for one subscriber."""
+    try:
+        csv_path = CSVService.generate_csv_for_subscription(subscription_id)
+    except (MySQLError, OSError, ValueError):
+        logger.exception(f"CSV generation failed for subscription {subscription_id}")
+        raise HTTPException(
+            status_code=500,
+            detail="CSV generation failed",
+        ) from None
+
     if not csv_path:
         raise HTTPException(
-            status_code=404, detail="No data found for this subscription"
+            status_code=404,
+            detail="No exportable data found for this subscription",
         )
 
     if not CSVService.upload_csv(csv_path, subscription_id):
-        raise HTTPException(status_code=500, detail="CSV upload failed")
+        raise HTTPException(
+            status_code=500,
+            detail="CSV upload failed",
+        )
 
     return {
         "success": True,
-        "message": f"CSV pushed for subscription {subscription_id}",
+        "message": f"CSV uploaded for subscription {subscription_id}",
     }
 
 
