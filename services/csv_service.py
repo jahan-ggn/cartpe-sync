@@ -6,6 +6,7 @@ import logging
 import re
 import shutil
 from pathlib import Path
+from uuid import uuid4
 
 import requests
 from mysql.connector import Error as MySQLError
@@ -79,7 +80,7 @@ class CSVService:
 
                 if not selected_stores:
                     logger.warning(
-                        f"No stores selected for subscription {subscription_id}"
+                        f"No selected stores available for subscription {subscription_id}"
                     )
                     return None
 
@@ -121,8 +122,6 @@ class CSVService:
                         GROUP_CONCAT(DISTINCT c.category_id
                             ORDER BY c.category_id SEPARATOR ', ') as categories
                     FROM products p
-                    JOIN subscription_permissions sp
-                        ON p.store_id = sp.store_id AND sp.subscription_id = %s
                     LEFT JOIN product_categories pc ON p.id = pc.product_id
                     LEFT JOIN categories c ON pc.category_id = c.category_id
                     WHERE p.image_url IS NOT NULL AND p.image_url != ''
@@ -131,10 +130,7 @@ class CSVService:
                     AND p.store_id IN ({placeholders})
                     GROUP BY p.id
                 """
-                cursor.execute(
-                    query,
-                    (subscription_id, *eligible_store_ids),
-                )
+                cursor.execute(query, tuple(eligible_store_ids))
                 products = cursor.fetchall()
 
             if not products:
@@ -148,24 +144,38 @@ class CSVService:
             csv_dir.mkdir(parents=True, exist_ok=True)
 
             timestamp = now().strftime("%Y%m%d_%H%M%S")
-            csv_path = csv_dir / f"subscription_{subscription_id}_{timestamp}.csv"
-
-            with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=FIELD_NAMES)
-                writer.writeheader()
-                writer.writerows(products)
+            csv_path = csv_dir / (
+                f"subscription_{subscription_id}_{timestamp}_{uuid4().hex}.csv"
+            )
 
             metadata_path = csv_path.with_suffix(".json")
-            metadata_path.write_text(
-                json.dumps(
-                    {
-                        "subscription_id": subscription_id,
-                        "store_ids": eligible_store_ids,
-                        "excluded_store_ids": excluded_store_ids,
-                    }
-                ),
-                encoding="utf-8",
-            )
+
+            try:
+                with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=FIELD_NAMES)
+                    writer.writeheader()
+                    writer.writerows(products)
+
+                metadata_path.write_text(
+                    json.dumps(
+                        {
+                            "subscription_id": subscription_id,
+                            "store_ids": eligible_store_ids,
+                            "excluded_store_ids": excluded_store_ids,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            except (OSError, ValueError, TypeError, csv.Error):
+                for artifact_path in (csv_path, metadata_path):
+                    try:
+                        artifact_path.unlink(missing_ok=True)
+                    except OSError:
+                        logger.exception(
+                            "Could not remove incomplete export file: %s",
+                            artifact_path,
+                        )
+                raise
 
             logger.info(
                 f"Generated CSV for subscription {subscription_id}: "
