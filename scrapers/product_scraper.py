@@ -3,7 +3,6 @@
 import json
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlsplit
 
 import requests
@@ -18,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 IMAGE_CDN = "https://cdn.cartpe.in/images"
 GALLERY_MD = "gallery_md"
-GALLERY_WORKERS = 5
 
 API_ERRORS = (requests.RequestException, ValueError, InvalidTag)
 
@@ -26,7 +24,7 @@ API_ERRORS = (requests.RequestException, ValueError, InvalidTag)
 class ProductScraper:
     """Scrapes products from the CartPE encrypted API"""
 
-    def __init__(self, product_service=None):
+    def __init__(self):
         self.session = requests.Session()
 
         retry_strategy = Retry(
@@ -41,8 +39,6 @@ class ProductScraper:
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
         self.session.headers.update({"User-Agent": settings.USER_AGENT})
-
-        self.product_service = product_service
 
     def _post_encrypted(self, url: str, body: dict, host: str) -> dict:
         """POST an encrypted body and decrypt the response envelope"""
@@ -283,89 +279,4 @@ class ProductScraper:
             f"skipped_no_slug={skipped_slugs})"
         )
 
-        if all_products and self.product_service:
-            self._fetch_galleries(all_products, store_id, base_url, host)
-
         return all_products, complete
-
-    def _needs_gallery(self, product: dict, existing_assets: dict[str, dict]) -> bool:
-        """Whether a product is new, changed, or still missing its gallery"""
-        existing = existing_assets.get(product["external_product_id"])
-        if existing is None or existing["product_images"] is None:
-            return True
-        new_filename = (product.get("image_url") or "").split("/")[-1]
-        return existing["image_url"].split("/")[-1] != new_filename
-
-    def _fetch_galleries(
-        self, all_products: list[dict], store_id: int, base_url: str, host: str
-    ) -> None:
-        """Fill `product_images` from the detail endpoint for new or changed products"""
-        # Batch-fetch existing assets to avoid N+1 queries
-        external_ids = [p["external_product_id"] for p in all_products]
-        existing_assets = self.product_service.get_existing_assets_batch(
-            store_id, external_ids
-        )
-
-        pending = [p for p in all_products if self._needs_gallery(p, existing_assets)]
-        if not pending:
-            return
-
-        logger.info(
-            f"Fetching galleries for {len(pending)} products "
-            f"(out of {len(all_products)} total)..."
-        )
-
-        def fetch_single(product: dict) -> tuple[str, str | None]:
-            main_url = product.get("image_url") or ""
-            return (
-                product["external_product_id"],
-                self.extract_product_images(
-                    base_url,
-                    host,
-                    product.get("site_slug") or "",
-                    main_url.split("/")[-1] if main_url else "",
-                ),
-            )
-
-        image_results: dict[str, str | None] = {}
-        with ThreadPoolExecutor(max_workers=GALLERY_WORKERS) as executor:
-            futures = [executor.submit(fetch_single, p) for p in pending]
-            for future in as_completed(futures):
-                external_id, images = future.result()
-                image_results[external_id] = images
-
-        for product in all_products:
-            product["product_images"] = image_results.get(
-                product["external_product_id"]
-            )
-
-    def extract_product_images(
-        self, base_url: str, host: str, site_slug: str, main_filename: str
-    ) -> str | None:
-        """Fetch the detail gallery and return the extra images as a joined string"""
-        try:
-            payload = self._post_encrypted(
-                f"{base_url}/api/product-details", {"slug": [site_slug]}, host
-            )
-        except requests.HTTPError as e:
-            logger.warning(
-                f"product-details returned {e.response.status_code} for {site_slug}"
-            )
-            return None
-        except API_ERRORS as e:
-            logger.warning(f"Error fetching product details for {site_slug}: {e}")
-            return None
-
-        gallery = (payload.get("data") or {}).get("gallery") or []
-        extras = [
-            entry["image"]
-            for entry in gallery
-            if isinstance(entry, dict)
-            and entry.get("image")
-            and entry["image"] != main_filename
-        ]
-        return ", ".join(self._image_url(name) for name in extras)
-
-    def close(self):
-        """Close the requests session"""
-        self.session.close()

@@ -171,7 +171,7 @@ class ProductService:
             product_url = VALUES(product_url),
             image_url = {_keep_if_r2("image_url")},
             source_image_url = VALUES(source_image_url),
-            product_images = {_keep_if_r2("product_images")},
+            product_images = NULL,
             current_price = VALUES(current_price),
             original_price = VALUES(original_price),
             has_variants = VALUES(has_variants),
@@ -237,7 +237,7 @@ class ProductService:
                         prod.get("product_url"),
                         prod.get("image_url"),
                         prod.get("source_image_url"),
-                        prod.get("product_images"),
+                        None,
                         prod.get("current_price"),
                         prod.get("original_price"),
                         prod.get("has_variants", False),
@@ -312,47 +312,3 @@ class ProductService:
         except MySQLError as e:
             logger.error(f"Error marking products inactive: {e}")
             return 0
-
-    @staticmethod
-    def get_existing_product_assets(
-        store_id: int, external_product_id: str
-    ) -> dict | None:
-        """Get an existing product's main image and gallery"""
-        query = """
-            SELECT image_url, product_images FROM products
-            WHERE store_id = %s AND external_product_id = %s
-        """
-        try:
-            result = DatabaseManager.execute_query(
-                query, (store_id, external_product_id), fetch=True
-            )
-            return result[0] if result else None
-        except MySQLError as e:
-            logger.error(f"Error fetching product assets: {e}")
-            return None
-
-    @staticmethod
-    def get_existing_assets_batch(
-        store_id: int, external_product_ids: list[str]
-    ) -> dict[str, dict]:
-        """Get image_url and product_images for multiple products in one query.
-
-        Returns {external_product_id: {"image_url": ..., "product_images": ...}}
-        """
-        if not external_product_ids:
-            return {}
-
-        placeholders = ", ".join(["%s"] * len(external_product_ids))
-        query = f"""
-            SELECT external_product_id, image_url, product_images
-            FROM products
-            WHERE store_id = %s AND external_product_id IN ({placeholders})
-        """
-        try:
-            rows = DatabaseManager.execute_query(
-                query, (store_id, *external_product_ids), fetch=True
-            )
-            return {row["external_product_id"]: row for row in rows}
-        except MySQLError as e:
-            logger.error(f"Error batch fetching product assets: {e}")
-            return {}

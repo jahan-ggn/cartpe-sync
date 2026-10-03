@@ -119,37 +119,15 @@ class ImageService:
         finally:
             temp_path.unlink(missing_ok=True)
 
-    def _mirror_gallery(
-        self, store_id: int, product_id: int, product_images_str: str
-    ) -> str | None:
-        """Mirror a comma-separated gallery, returning the joined R2 URLs"""
-        urls = [u.strip() for u in product_images_str.split(",") if u.strip()]
-        mirrored = []
-        for url in urls:
-            if self._is_r2_url(url):
-                continue
-            filename = f"{product_id}_{url.split('/')[-1]}"
-            r2_url = self._mirror_image(store_id, product_id, url, filename)
-            if r2_url:
-                mirrored.append(r2_url)
-        return ", ".join(mirrored) if mirrored else None
-
-    def _process_single(self, product: dict) -> tuple[int, str | None, str | None]:
-        """Mirror a product's main image and gallery; returns (id, url, gallery)"""
+    def _process_single(self, product: dict) -> tuple[int, str | None]:
+        """Mirror the main product image to R2."""
         store_id = product["store_id"]
         product_id = product["id"]
         source_url = product["source_image_url"]
 
-        main_filename = f"{product_id}_{source_url.split('/')[-1]}"
-        main_url = self._mirror_image(store_id, product_id, source_url, main_filename)
-
-        gallery = None
-        if main_url and product.get("product_images"):
-            gallery = self._mirror_gallery(
-                store_id, product_id, product["product_images"]
-            )
-
-        return (product_id, main_url, gallery)
+        filename = f"{product_id}_{source_url.split('/')[-1]}"
+        main_url = self._mirror_image(store_id, product_id, source_url, filename)
+        return product_id, main_url
 
     def _process_batch(self, products: list[dict]) -> tuple[int, int]:
         """Mirror a batch of products in parallel; returns (success, failed)"""
@@ -160,7 +138,7 @@ class ImageService:
 
             for future in as_completed(futures):
                 try:
-                    product_id, r2_url, gallery = future.result()
+                    product_id, r2_url = future.result()
                 except (MySQLError, OSError, ValueError) as e:
                     logger.error(f"Unexpected error in image processing thread: {e}")
                     failed += 1
@@ -175,10 +153,9 @@ class ImageService:
                         cursor = conn.cursor()
                         cursor.execute(
                             """UPDATE products
-                            SET image_url = %s, product_images = %s,
-                                updated_at = updated_at
+                            SET image_url = %s, updated_at = updated_at
                             WHERE id = %s""",
-                            (r2_url, gallery, product_id),
+                            (r2_url, product_id),
                         )
                 except MySQLError as e:
                     logger.error(f"Error updating image URLs for {product_id}: {e}")
@@ -197,7 +174,6 @@ class ImageService:
             cursor = conn.cursor(dictionary=True)
             cursor.execute(
                 """SELECT p.id, p.store_id, p.image_url, p.source_image_url,
-                    p.product_images
                 FROM products p
                 WHERE p.source_image_url IS NOT NULL
                 AND p.source_image_url != ''

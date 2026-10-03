@@ -87,7 +87,7 @@ def scrape_category(store_data: dict, category: dict) -> tuple[str, dict | None,
     category_name = category["category_name"]
     store_id = store_data["store_id"]
 
-    scraper = ProductScraper(product_service=ProductService)
+    scraper = ProductScraper()
     try:
         products, complete = scraper.extract_products(store_data, category)
 
