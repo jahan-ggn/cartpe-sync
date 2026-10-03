@@ -31,6 +31,7 @@ class DatabaseManager:
                     password=settings.DB_PASSWORD,
                     charset="utf8mb4",
                     autocommit=False,
+                    time_zone="+05:30",
                 )
                 logger.info(
                     f"Database pool initialized with {settings.POOL_SIZE} connections"

@@ -1,13 +1,17 @@
-"""Timestamp helpers — app times must share the MySQL server's clock"""
+"""Application timestamps use Asia/Kolkata."""
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+APP_TIMEZONE = ZoneInfo("Asia/Kolkata")
 
 
 def now() -> datetime:
-    """Current local time, matching MySQL's NOW()/CURRENT_TIMESTAMP()"""
-    return datetime.now()  # noqa: DTZ005
+    """Return naive IST for MySQL DATETIME columns."""
+    return datetime.now(APP_TIMEZONE).replace(tzinfo=None)
 
 
 def parse_date(value: str, fmt: str = "%Y-%m-%d") -> datetime:
-    """Parse a date string into naive local time, matching MySQL's clock"""
-    return datetime.strptime(value, fmt)  # noqa: DTZ007
+    """Parse an IST date and return naive IST for MySQL DATETIME."""
+    parsed = datetime.strptime(value, fmt).replace(tzinfo=APP_TIMEZONE)
+    return parsed.replace(tzinfo=None)
