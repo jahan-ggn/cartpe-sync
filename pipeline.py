@@ -126,17 +126,24 @@ def scrape_category(store_data: dict, category: dict) -> tuple[str, dict | None,
         scraper.close()
 
 
-def scrape_store_products(store_data: dict) -> tuple[str, dict, bool]:
-    """Scrape all products for one store, its categories in parallel"""
+def scrape_store_products(
+    store_data: dict,
+) -> tuple[str, dict, bool, int, int]:
+    """Return (store name, metrics, complete, failed categories, total categories)."""
     store_id = store_data["store_id"]
     store_name = store_data["store_name"]
 
-    store_metrics = {"new": 0, "price_changed": 0, "stock_changed": 0, "total": 0}
+    store_metrics = {
+        "new": 0,
+        "price_changed": 0,
+        "stock_changed": 0,
+        "total": 0,
+    }
 
     categories = CategoryService.get_categories_by_store(store_id)
     if not categories:
-        logger.warning(f"No categories found for {store_name}")
-        return (store_name, store_metrics, False)
+        logger.warning(f"No categories available for {store_name}")
+        return (store_name, store_metrics, False, 0, 0)
 
     logger.info(f"Processing {len(categories)} categories for {store_name} (parallel)")
 
@@ -149,38 +156,53 @@ def scrape_store_products(store_data: dict) -> tuple[str, dict, bool]:
 
         for future in as_completed(futures):
             category_name, metrics, cat_complete = future.result()
+
             if metrics:
                 merge_metrics(store_metrics, metrics)
+
             if not cat_complete:
                 failed_categories += 1
-                logger.warning(f"Category incomplete or failed: {category_name}")
+                logger.warning(
+                    f"Category incomplete or failed: " f"{store_name} / {category_name}"
+                )
 
-    return (store_name, store_metrics, failed_categories == 0)
+    return (
+        store_name,
+        store_metrics,
+        failed_categories == 0,
+        failed_categories,
+        len(categories),
+    )
 
 
 def run_product_scraping() -> bool:
-    """Scrape products for every CartPE store"""
+    """Scrape products for every CartPE store."""
     logger.info("=" * 80)
     logger.info("STEP 2: Product Scraping")
     logger.info("=" * 80)
 
     stores = StoreService.get_all_stores("cartpe")
     if not stores:
-        logger.warning("No stores found in database")
+        logger.warning("No stores available for product scraping")
         return False
 
     logger.info(f"Scraping products for {len(stores)} stores")
 
     successful, failed, total_products = 0, 0, 0
+    failed_categories, total_categories = 0, 0
 
     with ThreadPoolExecutor(max_workers=settings.MAX_WORKERS) as executor:
-        futures = [executor.submit(scrape_store_products, s) for s in stores]
+        futures = [executor.submit(scrape_store_products, store) for store in stores]
 
         for future in as_completed(futures):
-            store_name, metrics, ok = future.result()
+            store_name, metrics, ok, n_failed, n_total = future.result()
+
+            failed_categories += n_failed
+            total_categories += n_total
+            total_products += metrics["total"]
+
             if ok:
                 successful += 1
-                total_products += metrics["total"]
                 logger.info(
                     f"Products scraped: {store_name} "
                     f"(total: {metrics['total']}, new: {metrics['new']}, "
@@ -189,12 +211,31 @@ def run_product_scraping() -> bool:
                 )
             else:
                 failed += 1
-                logger.error(f"Products failed: {store_name}")
+                if n_total == 0:
+                    logger.error(
+                        f"Products failed: {store_name} " "— no categories available"
+                    )
+                else:
+                    logger.error(
+                        f"Products failed: {store_name} "
+                        f"({n_failed}/{n_total} categories incomplete or failed; "
+                        f"{metrics['total']} products upserted)"
+                    )
+
+    if failed:
+        logger.warning(
+            f"Product scraping incomplete: {failed}/{len(stores)} stores failed; "
+            f"{failed_categories}/{total_categories} categories incomplete "
+            "or failed. The upcoming push may include previously stored "
+            "stock data."
+        )
 
     logger.info(
-        f"Product scraping complete: {total_products} products "
-        f"from {successful} stores\n"
+        f"Product scraping finished: {total_products} products upserted; "
+        f"{successful} stores complete, "
+        f"{failed} stores incomplete or failed"
     )
+
     return failed == 0
 
 
@@ -211,7 +252,11 @@ def run_pipeline() -> None:
             )
 
         if not run_product_scraping():
-            logger.warning("Product scraping had failures, continuing...")
+            logger.warning(
+                "Product scraping had failures; continuing to image processing "
+                "and push. Subscribers may receive previously stored stock data "
+                "for incomplete or failed stores/categories."
+            )
 
         logger.info("=" * 80)
         logger.info("STEP 3: Image Processing")

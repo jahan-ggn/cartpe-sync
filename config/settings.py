@@ -62,6 +62,7 @@ class Settings:
     R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "")
     R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "")
     R2_UPLOAD_ENABLED = os.getenv("R2_UPLOAD_ENABLED", "false").lower() == "true"
+    IMAGE_WORKERS = int(os.getenv("IMAGE_WORKERS", "20"))
 
 
 settings = Settings()
@@ -80,6 +81,20 @@ def validate_settings() -> None:
 
     if settings.CATEGORY_WORKERS < 1:
         errors.append("CATEGORY_WORKERS must be at least 1")
+
+    if settings.IMAGE_WORKERS < 1:
+        errors.append("IMAGE_WORKERS must be at least 1")
+
+    if settings.MAX_WORKERS >= 1 and settings.CATEGORY_WORKERS >= 1:
+        product_concurrency = settings.MAX_WORKERS * settings.CATEGORY_WORKERS
+
+        if product_concurrency > settings.POOL_SIZE:
+            warnings.append(
+                f"Product scraping may require {product_concurrency} concurrent "
+                f"database connections, but POOL_SIZE={settings.POOL_SIZE}. "
+                "Reduce MAX_WORKERS or CATEGORY_WORKERS, or increase POOL_SIZE "
+                f"up to {CNX_POOL_MAXSIZE}. Pool exhaustion can fail category saves."
+            )
 
     # Required for core functionality
     if not settings.ADMIN_API_KEY:

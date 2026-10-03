@@ -22,12 +22,18 @@ class StoreCreateRequest(BaseModel):
 
 
 def fetch_and_store_categories(store_data: dict) -> None:
-    """Scrape and store categories for a newly created store"""
+    """Scrape and store categories for a newly created store."""
     scraper = CategoryScraper()
     try:
         categories, success = scraper.extract_categories(store_data)
-        if success and categories:
+        if not success:
+            logger.error(f"Category fetch failed for {store_data['store_name']}")
+            return
+
+        if categories:
             CategoryService.bulk_insert_categories(categories)
+    except MySQLError:
+        logger.exception(f"Category save failed for {store_data['store_name']}")
     finally:
         scraper.close()
 

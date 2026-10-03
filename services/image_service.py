@@ -16,8 +16,6 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# R2 key prefix. Kept as "starter" so existing object paths stay valid.
-IMAGE_WORKERS = 20
 MAX_DOWNLOAD_RETRIES = 3
 
 CONTENT_TYPES = {
@@ -34,7 +32,7 @@ class ImageService:
     """Downloads product images and mirrors them to R2"""
 
     def __init__(self):
-        config = Config(max_pool_connections=50)
+        config = Config(max_pool_connections=max(50, settings.IMAGE_WORKERS))
         self.s3_client = boto3.client(
             "s3",
             endpoint_url=settings.R2_ENDPOINT_URL,
@@ -126,7 +124,7 @@ class ImageService:
         """Mirror a batch of products in parallel; returns (success, failed)"""
         success = failed = 0
 
-        with ThreadPoolExecutor(max_workers=IMAGE_WORKERS) as executor:
+        with ThreadPoolExecutor(max_workers=settings.IMAGE_WORKERS) as executor:
             futures = [executor.submit(self._process_single, p) for p in products]
 
             for future in as_completed(futures):

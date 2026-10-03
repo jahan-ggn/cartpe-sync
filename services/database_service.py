@@ -118,7 +118,7 @@ class CategoryService:
             return rows_affected
         except MySQLError as e:
             logger.error(f"Error saving categories: {e}")
-            return 0
+            raise
 
     @staticmethod
     def get_categories_by_store(store_id: int) -> list[dict]:
