@@ -61,21 +61,3 @@ class PushOrchestrator:
             f"{results['failed']} failed, {results['no_data']} no data"
         )
         return results
-
-    @staticmethod
-    def update_last_push_at(token: str, buyer_domain: str) -> bool:
-        """Mark a subscription's permissions as pushed, after a successful upload"""
-        try:
-            with DatabaseManager.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """UPDATE subscription_permissions sp
-                    JOIN api_subscriptions s ON s.id = sp.subscription_id
-                    SET sp.last_push_at = NOW()
-                    WHERE s.token = %s AND s.buyer_domain = %s""",
-                    (token, buyer_domain.rstrip("/")),
-                )
-            return True
-        except MySQLError as e:
-            logger.error(f"Error updating last_push_at: {type(e).__name__}")
-            return False

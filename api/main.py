@@ -3,13 +3,11 @@
 import logging
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import (
     cron_router,
     stores_router,
     subscriptions_router,
-    webhooks_router,
 )
 from utils.logger import setup_logger
 
@@ -24,7 +22,6 @@ app = FastAPI(
 
 app.include_router(stores_router)
 app.include_router(subscriptions_router)
-app.include_router(webhooks_router)
 app.include_router(cron_router)
 
 
@@ -41,7 +38,6 @@ def read_root() -> dict:
             "subscription_status": "/api/subscriptions/status",
             "manual_push": "/api/subscriptions/push/{subscription_id}",
             "extend_subscription": "/api/subscriptions/extend/{subscription_id}",
-            "webhook": "/api/webhooks/push-complete",
             "cron_status": "/api/cron/status",
             "cron_update": "/api/cron/update",
             "cron_toggle": "/api/cron/toggle",

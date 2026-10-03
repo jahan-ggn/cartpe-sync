@@ -24,7 +24,6 @@ class Settings:
 
     # API auth
     ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
-    WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 
     # Scraping
     REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
@@ -79,8 +78,6 @@ def _validate_settings() -> None:
     # Required for core functionality
     if not settings.ADMIN_API_KEY:
         errors.append("ADMIN_API_KEY is required for admin endpoint authentication")
-    if not settings.WEBHOOK_SECRET:
-        errors.append("WEBHOOK_SECRET is required for webhook authentication")
     if not settings.CARTPE_KEY_SOURCE:
         errors.append("CARTPE_KEY_SOURCE is required for encrypted API access")
 

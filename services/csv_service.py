@@ -96,14 +96,7 @@ class CSVService:
                     LEFT JOIN categories c ON pc.category_id = c.category_id
                     WHERE p.image_url IS NOT NULL AND p.image_url != ''
                     AND p.is_active = 1
-                    AND (
-                        (sp.last_push_at IS NULL AND p.stock_status = 'in_stock')
-                        OR
-                        (sp.last_push_at IS NOT NULL AND p.stock_status = 'in_stock' AND (
-                            p.updated_at > sp.last_push_at
-                            OR p.created_at > sp.last_push_at
-                        ))
-                    )
+                    AND p.stock_status = 'in_stock'
                     GROUP BY p.id
                 """
                 cursor.execute(query, (subscription_id,))
