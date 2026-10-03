@@ -1,6 +1,7 @@
 """FastAPI application for CartPE Sync"""
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -9,15 +10,24 @@ from api.routes import (
     stores_router,
     subscriptions_router,
 )
+from config.settings import validate_settings
 from utils.logger import setup_logger
 
 setup_logger("api")
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    validate_settings()
+    yield
+
+
 app = FastAPI(
     title="CartPE Sync API",
     description="API for managing stores, subscriptions, and product sync",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.include_router(stores_router)

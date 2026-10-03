@@ -67,7 +67,7 @@ class Settings:
 settings = Settings()
 
 
-def _validate_settings() -> None:
+def validate_settings() -> None:
     """Fail fast on missing or invalid configuration."""
     errors = []
     warnings = []
@@ -116,7 +116,4 @@ def _validate_settings() -> None:
     if errors:
         for e in errors:
             print(f"ERROR: {e}")
-        raise SystemExit(f"Invalid application configuration: {len(errors)} errors")
-
-
-_validate_settings()
+        raise RuntimeError("Invalid application configuration: " + "; ".join(errors))

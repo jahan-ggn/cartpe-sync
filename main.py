@@ -4,7 +4,7 @@ import fcntl
 import logging
 import sys
 
-from config.settings import settings
+from config.settings import settings, validate_settings
 from pipeline import run_pipeline
 from services.csv_service import CSVService
 from utils.logger import setup_logger
@@ -13,6 +13,7 @@ LOCK_FILE = settings.BASE_DIR / "logs" / "pipeline.lock"
 
 
 def main() -> None:
+    validate_settings()
     setup_logger("cartpe")
     logger = logging.getLogger(__name__)
 
