@@ -159,17 +159,11 @@ class ProductService:
         if not products and mark_inactive is None:
             return metrics
 
-        r2_domain = settings.R2_PUBLIC_URL.replace("https://", "").replace(
-            "http://", ""
+        r2_prefix = (
+            settings.R2_PUBLIC_URL.rstrip("/") + "/" if settings.R2_PUBLIC_URL else ""
         )
 
-        def _keep_if_r2(column: str) -> str:
-            """Preserve an already-mirrored URL; otherwise take the scraped value"""
-            if not r2_domain:
-                return f"VALUES({column})"
-            return f"IF({column} LIKE '%{r2_domain}%', {column}, VALUES({column}))"
-
-        query = f"""
+        query = """
             INSERT INTO products
             (store_id, store_name, external_product_id, product_name, product_url,
             image_url, source_image_url, product_images,
@@ -196,7 +190,13 @@ class ProductService:
             ),
             product_name = VALUES(product_name),
             product_url = VALUES(product_url),
-            image_url = {_keep_if_r2("image_url")},
+            image_url = IF(
+                %s != ''
+                AND LEFT(image_url, CHAR_LENGTH(%s)) = %s
+                AND source_image_url <=> VALUES(source_image_url),
+                image_url,
+                VALUES(image_url)
+            ),
             source_image_url = VALUES(source_image_url),
             product_images = NULL,
             current_price = VALUES(current_price),
@@ -291,7 +291,10 @@ class ProductService:
                         now(),
                     )
 
-                    cursor.execute(query, data)
+                    cursor.execute(
+                        query,
+                        data + (r2_prefix, r2_prefix, r2_prefix),
+                    )
 
                     # On update, lastrowid is unreliable — reuse the row we fetched
                     product_id = existing["id"] if existing else cursor.lastrowid
