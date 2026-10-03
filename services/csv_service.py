@@ -3,7 +3,6 @@
 import csv
 import json
 import logging
-import re
 import shutil
 from pathlib import Path
 from uuid import uuid4
@@ -139,8 +138,7 @@ class CSVService:
                     "generating a header-only CSV"
                 )
 
-            domain_clean = re.sub(r"^https?://", "", buyer_domain)
-            csv_dir = Path(CSVService.BASE_CSV_DIR) / domain_clean
+            csv_dir = Path(CSVService.BASE_CSV_DIR) / f"subscription_{subscription_id}"
             csv_dir.mkdir(parents=True, exist_ok=True)
 
             timestamp = now().strftime("%Y%m%d_%H%M%S")
@@ -166,7 +164,7 @@ class CSVService:
                     ),
                     encoding="utf-8",
                 )
-            except (OSError, ValueError, TypeError, csv.Error):
+            except (OSError, ValueError, TypeError, csv.Error) as e:
                 for artifact_path in (csv_path, metadata_path):
                     try:
                         artifact_path.unlink(missing_ok=True)
@@ -175,7 +173,10 @@ class CSVService:
                             "Could not remove incomplete export file: %s",
                             artifact_path,
                         )
-                raise
+
+                raise ValueError(
+                    f"Could not write export for subscription {subscription_id}"
+                ) from e
 
             logger.info(
                 f"Generated CSV for subscription {subscription_id}: "
