@@ -13,9 +13,9 @@ LOCK_FILE = settings.BASE_DIR / "logs" / "pipeline.lock"
 
 
 def main() -> None:
-    validate_settings()
     setup_logger("cartpe")
     logger = logging.getLogger(__name__)
+    validate_settings()
 
     LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
 

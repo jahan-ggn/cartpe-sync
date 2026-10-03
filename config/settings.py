@@ -1,10 +1,13 @@
 """Application configuration settings"""
 
+import logging
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 from mysql.connector.pooling import CNX_POOL_MAXSIZE
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -125,10 +128,10 @@ def validate_settings() -> None:
     if not settings.DB_PASSWORD:
         warnings.append("DB_PASSWORD is empty — ensure this is intentional")
 
-    for w in warnings:
-        print(f"WARNING: {w}")
+    for warning in warnings:
+        logger.warning(warning)
 
     if errors:
-        for e in errors:
-            print(f"ERROR: {e}")
+        for error in errors:
+            logger.error(error)
         raise RuntimeError("Invalid application configuration: " + "; ".join(errors))
