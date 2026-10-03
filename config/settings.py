@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from mysql.connector.pooling import CNX_POOL_MAXSIZE
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -37,7 +38,12 @@ class Settings:
 
     # Connection pool
     POOL_NAME = "cartpe_sync_pool"
-    POOL_SIZE = int(os.getenv("POOL_SIZE", str(MAX_WORKERS * CATEGORY_WORKERS + 10)))
+    POOL_SIZE = int(
+        os.getenv(
+            "POOL_SIZE",
+            str(min(MAX_WORKERS * CATEGORY_WORKERS + 10, CNX_POOL_MAXSIZE)),
+        )
+    )
 
     # CartPE encrypted API
     CARTPE_KEY_SOURCE = os.getenv("CARTPE_KEY_SOURCE", "")
@@ -66,6 +72,9 @@ def _validate_settings() -> None:
     """Fail fast on missing required environment variables"""
     errors = []
     warnings = []
+
+    if not 1 <= settings.POOL_SIZE <= CNX_POOL_MAXSIZE:
+        errors.append(f"POOL_SIZE must be between 1 and {CNX_POOL_MAXSIZE}")
 
     # Required for core functionality
     if not settings.ADMIN_API_KEY:
