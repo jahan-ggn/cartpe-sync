@@ -73,7 +73,6 @@ class ProductScraper:
             {
                 "name": "Size",
                 "value": str(size["sizeName"]),
-                "in_stock": size.get("qty", 0) > 0,
             }
             for size in sizes or []
             if isinstance(size, dict)
