@@ -54,7 +54,7 @@ def run_category_scraping() -> bool:
 
     stores = StoreService.get_all_stores("cartpe")
     if not stores:
-        logger.warning("No stores found in database")
+        logger.warning("No CartPE stores configured; pipeline will not proceed")
         return False
 
     logger.info(f"Scraping categories for {len(stores)} stores")

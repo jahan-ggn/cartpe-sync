@@ -42,7 +42,7 @@ class StoreService:
 
     @staticmethod
     def get_all_stores(store_type: str | None = None) -> list[dict]:
-        """Fetch stores, optionally filtered by type (None returns all)"""
+        """Fetch stores; database errors propagate to the caller."""
         if store_type:
             query = "SELECT * FROM stores WHERE store_type = %s"
             params = (store_type,)
@@ -50,13 +50,9 @@ class StoreService:
             query = "SELECT * FROM stores"
             params = None
 
-        try:
-            stores = DatabaseManager.execute_query(query, params, fetch=True)
-            logger.info(f"Found {len(stores)} stores in database")
-            return stores
-        except MySQLError as e:
-            logger.error(f"Error fetching stores: {e}")
-            return []
+        stores = DatabaseManager.execute_query(query, params, fetch=True)
+        logger.info(f"Found {len(stores)} stores in database")
+        return stores
 
     @staticmethod
     def create_store(store_data: dict) -> dict:
