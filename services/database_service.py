@@ -219,19 +219,40 @@ class ProductService:
                     ProductService.mark_category_products_inactive(
                         mark_inactive[0], mark_inactive[1], cursor=cursor
                     )
+                ids_by_store = {}
+                for prod in products:
+                    ids_by_store.setdefault(prod["store_id"], set()).add(
+                        prod["external_product_id"]
+                    )
+
+                existing_by_key = {}
+                for store_id, external_ids in ids_by_store.items():
+                    external_ids = list(external_ids)
+
+                    for offset in range(0, len(external_ids), 500):
+                        batch = external_ids[offset : offset + 500]
+                        placeholders = ", ".join(["%s"] * len(batch))
+
+                        cursor.execute(
+                            f"""SELECT id, external_product_id, current_price,
+                                original_price, stock_status, source_image_url
+                            FROM products
+                            WHERE store_id = %s
+                            AND external_product_id IN ({placeholders})""",
+                            (store_id, *batch),
+                        )
+
+                        for row in cursor.fetchall():
+                            existing_by_key[
+                                (store_id, str(row["external_product_id"]))
+                            ] = row
 
                 for prod in products:
+                    key = (prod["store_id"], str(prod["external_product_id"]))
+                    existing = existing_by_key.get(key)
                     attributes = prod.get("attributes")
                     if isinstance(attributes, list):
                         attributes = json.dumps(attributes) if attributes else None
-
-                    cursor.execute(
-                        """SELECT id, current_price, original_price, stock_status,
-                        source_image_url FROM products
-                        WHERE store_id = %s AND external_product_id = %s""",
-                        (prod["store_id"], prod["external_product_id"]),
-                    )
-                    existing = cursor.fetchone()
 
                     if existing is None:
                         metrics["new"] += 1
@@ -274,6 +295,13 @@ class ProductService:
 
                     # On update, lastrowid is unreliable — reuse the row we fetched
                     product_id = existing["id"] if existing else cursor.lastrowid
+                    existing_by_key[key] = {
+                        "id": product_id,
+                        "current_price": prod.get("current_price"),
+                        "original_price": prod.get("original_price"),
+                        "stock_status": prod.get("stock_status", "in_stock"),
+                        "source_image_url": prod.get("source_image_url"),
+                    }
 
                     if product_id and prod.get("category_id"):
                         cursor.execute(
