@@ -28,7 +28,7 @@ class PushOrchestrator:
             "total": len(subscriptions),
             "success": 0,
             "failed": 0,
-            "no_data": 0,
+            "skipped": 0,
         }
 
         for sub in subscriptions:
@@ -45,8 +45,11 @@ class PushOrchestrator:
                 continue
 
             if csv_path is None:
-                results["no_data"] += 1
-                logger.info(f"No data to push for {buyer_domain}")
+                results["skipped"] += 1
+                logger.warning(
+                    f"Push skipped for {buyer_domain}: "
+                    "subscription is inactive or no stores are selected"
+                )
                 continue
 
             if CSVService.upload_csv(csv_path, subscription_id):
@@ -58,6 +61,6 @@ class PushOrchestrator:
 
         logger.info(
             f"Push completed: {results['success']} success, "
-            f"{results['failed']} failed, {results['no_data']} no data"
+            f"{results['failed']} failed, {results['skipped']} skipped"
         )
         return results

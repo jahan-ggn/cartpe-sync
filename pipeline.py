@@ -278,7 +278,7 @@ def run_pipeline() -> None:
             results = PushOrchestrator.push_to_all_subscriptions()
             logger.info(
                 f"Push complete: {results['success']} success, "
-                f"{results['failed']} failed, {results['no_data']} no data"
+                f"{results['failed']} failed, {results['skipped']} skipped"
             )
         except MySQLError as e:
             logger.error(f"Data push failed: {e}\n{traceback.format_exc()}")

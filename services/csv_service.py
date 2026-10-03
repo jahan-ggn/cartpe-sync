@@ -126,12 +126,7 @@ class CSVService:
             )
             return str(csv_path)
 
-        except (
-            MySQLError,
-            OSError,
-            ValueError,
-            requests.RequestException,
-        ) as e:
+        except (MySQLError, OSError, ValueError) as e:
             logger.error(
                 f"Error generating CSV for subscription {subscription_id}: "
                 f"{type(e).__name__}"

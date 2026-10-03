@@ -125,6 +125,11 @@ def update_cron_schedule(request: CronUpdateRequest) -> dict:
 def toggle_cron() -> dict:
     """Enable or disable the scraper's schedule"""
     current = _get_crontab()
+    if _parse_cron_line(current) is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Scraper cron schedule not found",
+        )
     _backup_crontab(current)
 
     new_lines = []
