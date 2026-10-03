@@ -17,7 +17,6 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 # R2 key prefix. Kept as "starter" so existing object paths stay valid.
-R2_FOLDER = "starter"
 IMAGE_WORKERS = 20
 MAX_DOWNLOAD_RETRIES = 3
 
@@ -47,12 +46,6 @@ class ImageService:
         self.bucket_name = settings.R2_BUCKET_NAME
         self.temp_dir = settings.BASE_DIR / "temp_images"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
-
-    def _is_r2_url(self, url: str) -> bool:
-        """Whether a URL already points at our R2 bucket"""
-        if not settings.R2_PUBLIC_URL:
-            return False
-        return bool(url) and url.startswith(settings.R2_PUBLIC_URL)
 
     def _download(self, url: str, temp_path: Path, timeout: int = 360) -> None:
         """Stream a URL to disk; raises on any failure"""
@@ -173,7 +166,7 @@ class ImageService:
         with DatabaseManager.get_connection() as conn:
             cursor = conn.cursor(dictionary=True)
             cursor.execute(
-                """SELECT p.id, p.store_id, p.image_url, p.source_image_url,
+                """SELECT p.id, p.store_id, p.image_url, p.source_image_url
                 FROM products p
                 WHERE p.source_image_url IS NOT NULL
                 AND p.source_image_url != ''
