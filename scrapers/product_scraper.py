@@ -275,8 +275,8 @@ class ProductScraper:
 
         logger.info(
             f"Total products extracted for {category_name}: "
-            f"{len(all_products)} (complete={complete})"
-            f"skipped_no_slug={skipped_slugs})"
+            f"{len(all_products)} "
+            f"(complete={complete}, skipped_no_slug={skipped_slugs})"
         )
 
         return all_products, complete
