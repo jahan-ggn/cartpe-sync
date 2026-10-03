@@ -103,8 +103,10 @@ class CSVService:
                 products = cursor.fetchall()
 
             if not products:
-                logger.info(f"No products to push for subscription {subscription_id}")
-                return None
+                logger.info(
+                    f"No in-stock products for subscription {subscription_id}; "
+                    "generating a header-only CSV"
+                )
 
             domain_clean = re.sub(r"^https?://", "", buyer_domain)
             csv_dir = Path(CSVService.BASE_CSV_DIR) / domain_clean
