@@ -2,6 +2,7 @@
 
 import logging
 import re
+import shlex
 import subprocess
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,8 +16,9 @@ router = APIRouter(prefix="/api", tags=["cron"])
 
 CRONTAB_BIN = "/usr/bin/crontab"
 CRON_COMMAND = (
-    f"cd {settings.BASE_DIR} && {settings.BASE_DIR}/venv/bin/python main.py "
-    f">> {settings.BASE_DIR}/logs/cron.log 2>&1"
+    f"cd {shlex.quote(str(settings.BASE_DIR))} && "
+    f"{shlex.quote(str(settings.BASE_DIR / 'venv/bin/python'))} main.py "
+    f">> {shlex.quote(str(settings.BASE_DIR / 'logs/cron.log'))} 2>&1"
 )
 CRON_FIELD = r"[\d*,/-]+"
 CRON_PATTERN = re.compile(
