@@ -167,7 +167,13 @@ def scrape_store_products(
                 )
 
     if failed_categories == 0:
-        StoreService.mark_product_scrape_complete(store_id)
+        try:
+            StoreService.mark_product_scrape_complete(store_id)
+        except MySQLError:
+            logger.exception(
+                f"Products scraped successfully for {store_name}, "
+                "but the completion timestamp could not be saved; continuing"
+            )
 
     return (
         store_name,
