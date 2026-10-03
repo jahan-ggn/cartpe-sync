@@ -136,11 +136,13 @@ class ProductScraper:
     def extract_products(
         self, store_data: dict, category_data: dict
     ) -> tuple[list[dict], bool]:
-        """Extract all products for a category, paging until exhausted.
+        """Extract products for a category, paging until exhausted.
 
-        Returns (products, complete). `complete` is True only when pagination
-        ended normally and the collected unique IDs match the reported total.
+        Returns (products, complete). Completeness requires valid pagination
+        and a unique-ID count matching the reported total, including products
+        deliberately skipped because their slug is missing.
         """
+
         store_id = store_data["store_id"]
         store_name = store_data["store_name"]
         base_url = store_data["base_url"].rstrip("/")
@@ -156,7 +158,7 @@ class ProductScraper:
         page = 1
         complete = True
         reported_total: int | None = None
-        skipped_slugs = 0
+        skipped_slug_ids: set[str] = set()
 
         logger.info(f"Fetching products for {store_name} - {category_name}")
 
@@ -253,8 +255,18 @@ class ProductScraper:
                     all_products.append(product)
                     seen_ids.add(product["external_product_id"])
                 elif reason == "no_slug":
-                    skipped_slugs += 1
-                    complete = False
+                    external_id = item.get("id")
+                    if (
+                        isinstance(external_id, bool)
+                        or not isinstance(external_id, (str, int))
+                        or not str(external_id).strip()
+                    ):
+                        logger.warning(
+                            f"Slug-less product has an invalid ID in {category_name}"
+                        )
+                        complete = False
+                    else:
+                        skipped_slug_ids.add(str(external_id))
                 else:
                     complete = False
 
@@ -266,17 +278,23 @@ class ProductScraper:
             page += 1
             time.sleep(settings.REQUEST_DELAY)
 
-        if complete and reported_total is not None and len(seen_ids) != reported_total:
+        accounted_ids = seen_ids | skipped_slug_ids
+
+        if (
+            complete
+            and reported_total is not None
+            and len(accounted_ids) != reported_total
+        ):
             logger.warning(
-                f"Collected {len(seen_ids)} unique products for "
-                f"{category_name} but API reported total={reported_total}"
+                f"Accounted for {len(accounted_ids)} unique products in "
+                f"{category_name}, but API reported total={reported_total}"
             )
             complete = False
 
         logger.info(
             f"Total products extracted for {category_name}: "
             f"{len(all_products)} "
-            f"(complete={complete}, skipped_no_slug={skipped_slugs})"
+            f"(complete={complete}, skipped_no_slug={len(skipped_slug_ids)})"
         )
 
         return all_products, complete
