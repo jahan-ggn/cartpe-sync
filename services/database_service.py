@@ -132,6 +132,14 @@ class CategoryService:
             logger.error(f"Error fetching categories for store {store_id}: {e}")
             return []
 
+    @staticmethod
+    def get_all_categories() -> list[dict]:
+        """Fetch categories for all stores in one query."""
+        return DatabaseManager.execute_query(
+            "SELECT * FROM categories",
+            fetch=True,
+        )
+
 
 class ProductService:
     """Product-related database operations"""

@@ -34,12 +34,23 @@ def fetch_and_store_categories(store_data: dict) -> None:
 
 @router.get("/stores")
 def get_stores() -> list[dict]:
-    """List stores with their categories"""
+    """List stores with their categories."""
     try:
         stores = StoreService.get_all_stores()
+        categories = CategoryService.get_all_categories()
     except MySQLError as e:
-        logger.error(f"Error fetching stores: {e}")
+        logger.error(f"Error fetching stores/categories: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+    categories_by_store = {}
+    for cat in categories:
+        categories_by_store.setdefault(cat["store_id"], []).append(
+            {
+                "category_id": cat["category_id"],
+                "category_name": cat["category_name"],
+                "category_slug": cat["category_slug"],
+            }
+        )
 
     return [
         {
@@ -47,14 +58,7 @@ def get_stores() -> list[dict]:
             "store_type": store["store_type"],
             "store_name": store["store_name"],
             "base_url": store["base_url"],
-            "categories": [
-                {
-                    "category_id": cat["category_id"],
-                    "category_name": cat["category_name"],
-                    "category_slug": cat["category_slug"],
-                }
-                for cat in CategoryService.get_categories_by_store(store["store_id"])
-            ],
+            "categories": categories_by_store.get(store["store_id"], []),
         }
         for store in stores
     ]
