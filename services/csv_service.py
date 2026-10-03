@@ -1,6 +1,7 @@
 """CSV generation service for subscription data"""
 
 import csv
+import json
 import logging
 import re
 import shutil
@@ -8,10 +9,10 @@ from pathlib import Path
 
 import requests
 from mysql.connector import Error as MySQLError
-from utils.timeutil import now
 
 from config.database import DatabaseManager
 from config.settings import settings
+from utils.timeutil import now
 
 logger = logging.getLogger(__name__)
 
@@ -67,17 +68,47 @@ class CSVService:
                 buyer_domain = subscription["buyer_domain"]
 
                 cursor.execute(
-                    """SELECT store_id FROM subscription_permissions
-                    WHERE subscription_id = %s""",
+                    """SELECT s.store_id, s.last_complete_product_scrape_at
+                    FROM subscription_permissions sp
+                    JOIN stores s ON s.store_id = sp.store_id
+                    WHERE sp.subscription_id = %s
+                    ORDER BY s.store_id""",
                     (subscription_id,),
                 )
-                if not cursor.fetchall():
+                selected_stores = cursor.fetchall()
+
+                if not selected_stores:
                     logger.warning(
                         f"No stores selected for subscription {subscription_id}"
                     )
                     return None
 
-                query = """
+                eligible_store_ids = [
+                    row["store_id"]
+                    for row in selected_stores
+                    if row["last_complete_product_scrape_at"] is not None
+                ]
+                excluded_store_ids = [
+                    row["store_id"]
+                    for row in selected_stores
+                    if row["last_complete_product_scrape_at"] is None
+                ]
+
+                if excluded_store_ids:
+                    logger.warning(
+                        f"Subscription {subscription_id}: excluding stores with no "
+                        f"recorded complete scrape: {excluded_store_ids}"
+                    )
+
+                if not eligible_store_ids:
+                    logger.warning(
+                        f"Subscription {subscription_id}: no stores eligible for export"
+                    )
+                    return None
+
+                placeholders = ", ".join(["%s"] * len(eligible_store_ids))
+
+                query = f"""
                     SELECT
                         p.id, p.store_id, p.store_name,
                         p.external_product_id as product_id,
@@ -97,9 +128,13 @@ class CSVService:
                     WHERE p.image_url IS NOT NULL AND p.image_url != ''
                     AND p.is_active = 1
                     AND p.stock_status = 'in_stock'
+                    AND p.store_id IN ({placeholders})
                     GROUP BY p.id
                 """
-                cursor.execute(query, (subscription_id,))
+                cursor.execute(
+                    query,
+                    (subscription_id, *eligible_store_ids),
+                )
                 products = cursor.fetchall()
 
             if not products:
@@ -120,6 +155,18 @@ class CSVService:
                 writer.writeheader()
                 writer.writerows(products)
 
+            metadata_path = csv_path.with_suffix(".json")
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "subscription_id": subscription_id,
+                        "store_ids": eligible_store_ids,
+                        "excluded_store_ids": excluded_store_ids,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
             logger.info(
                 f"Generated CSV for subscription {subscription_id}: "
                 f"{len(products)} products"
@@ -135,40 +182,81 @@ class CSVService:
 
     @staticmethod
     def upload_csv(csv_path: str, subscription_id: int) -> bool:
-        """Upload a full CSV to WordPress in a single request"""
+        """Upload an inventory CSV with its eligible store IDs."""
         try:
+            metadata_path = Path(csv_path).with_suffix(".json")
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+            if not isinstance(metadata, dict):
+                raise TypeError("CSV metadata must be a dictionary")
+
+            if (
+                type(metadata.get("subscription_id")) is not int
+                or metadata["subscription_id"] != subscription_id
+            ):
+                raise ValueError("CSV metadata subscription mismatch")
+
+            store_ids = metadata.get("store_ids")
+            if (
+                not isinstance(store_ids, list)
+                or not store_ids
+                or any(
+                    type(store_id) is not int or store_id <= 0 for store_id in store_ids
+                )
+            ):
+                raise ValueError("CSV metadata has invalid store IDs")
+
             with DatabaseManager.get_connection() as conn:
                 cursor = conn.cursor(dictionary=True)
-                cursor.execute(
-                    """SELECT w.consumer_key, w.consumer_secret, s.buyer_domain
-                    FROM woocommerce_credentials w
-                    JOIN api_subscriptions s ON s.id = w.subscription_id
-                    WHERE w.subscription_id = %s""",
-                    (subscription_id,),
-                )
-                row = cursor.fetchone()
+                try:
+                    cursor.execute(
+                        """SELECT w.consumer_key, w.consumer_secret, s.buyer_domain
+                        FROM woocommerce_credentials w
+                        JOIN api_subscriptions s ON s.id = w.subscription_id
+                        WHERE w.subscription_id = %s""",
+                        (subscription_id,),
+                    )
+                    row = cursor.fetchone()
+                finally:
+                    cursor.close()
+
                 if not row:
                     raise ValueError(
                         f"No credentials found for subscription {subscription_id}"
                     )
 
             api_url = (
-                f"{row['buyer_domain']}/wp-json/product-sync/v1/products"
-                f"?consumer_key={row['consumer_key']}"
-                f"&consumer_secret={row['consumer_secret']}"
+                f"{row['buyer_domain'].rstrip('/')}" "/wp-json/product-sync/v1/products"
             )
 
-            with open(csv_path, "rb") as f:
-                response = requests.post(api_url, files={"file": f}, timeout=60)
-            response.raise_for_status()
+            with open(csv_path, "rb") as csv_file:
+                response = requests.post(
+                    api_url,
+                    params={
+                        "consumer_key": row["consumer_key"],
+                        "consumer_secret": row["consumer_secret"],
+                    },
+                    files={"file": csv_file},
+                    data={"store_ids": json.dumps(store_ids)},
+                    timeout=60,
+                )
 
-            logger.info(f"CSV uploaded successfully for subscription {subscription_id}")
+            try:
+                response.raise_for_status()
+            finally:
+                response.close()
+
+            logger.info(
+                f"CSV uploaded successfully for subscription {subscription_id}: "
+                f"{len(store_ids)} stores"
+            )
             return True
 
         except (
             MySQLError,
             OSError,
             ValueError,
+            TypeError,
             requests.RequestException,
         ) as e:
             logger.error(

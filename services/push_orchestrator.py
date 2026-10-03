@@ -48,7 +48,8 @@ class PushOrchestrator:
                 results["skipped"] += 1
                 logger.warning(
                     f"Push skipped for {buyer_domain}: "
-                    "subscription is inactive or no stores are selected"
+                    "no active subscription, no selected stores, "
+                    "or no stores with a recorded complete scrape"
                 )
                 continue
 
