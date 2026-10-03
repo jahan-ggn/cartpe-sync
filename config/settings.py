@@ -76,6 +76,9 @@ def validate_settings() -> None:
     errors = []
     warnings = []
 
+    if settings.LOG_LEVEL.upper() not in logging.getLevelNamesMapping():
+        errors.append(f"Invalid LOG_LEVEL: {settings.LOG_LEVEL!r}")
+
     if not 1 <= settings.POOL_SIZE <= CNX_POOL_MAXSIZE:
         errors.append(f"POOL_SIZE must be between 1 and {CNX_POOL_MAXSIZE}")
 

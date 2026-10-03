@@ -16,7 +16,8 @@ def setup_logger(source: str = "scraper"):
     os.makedirs(settings.LOG_DIR, exist_ok=True)
 
     logger = logging.getLogger()
-    logger.setLevel(getattr(logging, settings.LOG_LEVEL))
+    level = logging.getLevelNamesMapping().get(settings.LOG_LEVEL.upper())
+    logger.setLevel(level if level is not None else logging.INFO)
 
     # Clear existing handlers
     logger.handlers.clear()
