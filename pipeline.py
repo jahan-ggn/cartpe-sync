@@ -166,6 +166,9 @@ def scrape_store_products(
                     f"Category incomplete or failed: " f"{store_name} / {category_name}"
                 )
 
+    if failed_categories == 0:
+        StoreService.mark_product_scrape_complete(store_id)
+
     return (
         store_name,
         store_metrics,
