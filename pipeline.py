@@ -206,7 +206,9 @@ def run_pipeline() -> None:
 
     try:
         if not run_category_scraping():
-            logger.warning("Category scraping had failures, continuing...")
+            raise RuntimeError(
+                "Category scraping failed; aborting pipeline before product scraping and push"
+            )
 
         if not run_product_scraping():
             logger.warning("Product scraping had failures, continuing...")
