@@ -179,6 +179,21 @@ class ProductService:
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
+            updated_at = IF(
+                product_name <=> VALUES(product_name) AND
+                product_url <=> VALUES(product_url) AND
+                current_price <=> VALUES(current_price) AND
+                original_price <=> VALUES(original_price) AND
+                stock_status <=> VALUES(stock_status) AND
+                source_image_url <=> VALUES(source_image_url) AND
+                has_variants <=> VALUES(has_variants) AND
+                variants <=> VALUES(variants) AND
+                short_description <=> VALUES(short_description) AND
+                description <=> VALUES(description) AND
+                attributes <=> VALUES(attributes),
+                updated_at,
+                VALUES(updated_at)
+            ),
             product_name = VALUES(product_name),
             product_url = VALUES(product_url),
             image_url = {_keep_if_r2("image_url")},
@@ -193,16 +208,7 @@ class ProductService:
             short_description = VALUES(short_description),
             description = VALUES(description),
             attributes = VALUES(attributes),
-            last_synced_at = VALUES(last_synced_at),
-            updated_at = IF(
-                product_name = VALUES(product_name) AND
-                current_price = VALUES(current_price) AND
-                original_price = VALUES(original_price) AND
-                stock_status = VALUES(stock_status) AND
-                source_image_url = VALUES(source_image_url),
-                updated_at,
-                VALUES(updated_at)
-            )
+            last_synced_at = VALUES(last_synced_at)
         """
 
         try:
