@@ -68,12 +68,18 @@ settings = Settings()
 
 
 def _validate_settings() -> None:
-    """Fail fast on missing required environment variables"""
+    """Fail fast on missing or invalid configuration."""
     errors = []
     warnings = []
 
     if not 1 <= settings.POOL_SIZE <= CNX_POOL_MAXSIZE:
         errors.append(f"POOL_SIZE must be between 1 and {CNX_POOL_MAXSIZE}")
+
+    if settings.MAX_WORKERS < 1:
+        errors.append("MAX_WORKERS must be at least 1")
+
+    if settings.CATEGORY_WORKERS < 1:
+        errors.append("CATEGORY_WORKERS must be at least 1")
 
     # Required for core functionality
     if not settings.ADMIN_API_KEY:
@@ -110,9 +116,7 @@ def _validate_settings() -> None:
     if errors:
         for e in errors:
             print(f"ERROR: {e}")
-        raise SystemExit(
-            f"Missing required environment variables: {len(errors)} errors"
-        )
+        raise SystemExit(f"Invalid application configuration: {len(errors)} errors")
 
 
 _validate_settings()

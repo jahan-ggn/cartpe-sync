@@ -14,8 +14,6 @@ from services.push_orchestrator import PushOrchestrator
 
 logger = logging.getLogger(__name__)
 
-CATEGORY_WORKERS = 5
-
 
 def merge_metrics(target: dict, source: dict) -> None:
     """Merge source metrics into target by summing values"""
@@ -144,7 +142,7 @@ def scrape_store_products(store_data: dict) -> tuple[str, dict, bool]:
 
     failed_categories = 0
 
-    with ThreadPoolExecutor(max_workers=CATEGORY_WORKERS) as executor:
+    with ThreadPoolExecutor(max_workers=settings.CATEGORY_WORKERS) as executor:
         futures = [
             executor.submit(scrape_category, store_data, cat) for cat in categories
         ]
