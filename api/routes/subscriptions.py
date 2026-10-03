@@ -155,11 +155,19 @@ async def extend_subscription(
 
     with DatabaseManager.get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE api_subscriptions SET expires_at = %s WHERE id = %s",
-            (expires_at, subscription_id),
-        )
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Subscription not found")
+        try:
+            cursor.execute(
+                "SELECT id FROM api_subscriptions WHERE id = %s FOR UPDATE",
+                (subscription_id,),
+            )
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Subscription not found")
+
+            cursor.execute(
+                "UPDATE api_subscriptions SET expires_at = %s WHERE id = %s",
+                (expires_at, subscription_id),
+            )
+        finally:
+            cursor.close()
 
     return {"success": True, "expires_at": request.expires_at}
