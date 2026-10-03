@@ -35,8 +35,8 @@ def scrape_and_save_categories(store_data: dict) -> tuple[str, int, bool]:
             logger.warning(f"No categories found for {store_name}")
             return (store_name, 0, False)
 
-        inserted = CategoryService.bulk_insert_categories(categories)
-        logger.info(f"Saved {inserted} new categories for {store_name}")
+        CategoryService.bulk_insert_categories(categories)
+        logger.info(f"Saved/refreshed {len(categories)} categories for {store_name}")
         return (store_name, len(categories), True)
 
     except MySQLError as e:

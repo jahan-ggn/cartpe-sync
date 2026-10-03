@@ -85,15 +85,19 @@ class CategoryService:
 
     @staticmethod
     def bulk_insert_categories(categories: list[dict]) -> int:
-        """Bulk insert categories using INSERT IGNORE"""
+        """Insert categories or refresh existing category details."""
         if not categories:
             return 0
 
         query = """
-            INSERT IGNORE INTO categories
+            INSERT INTO categories
             (store_id, external_category_id, category_name, category_slug,
             category_url, created_at)
             VALUES (%s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                category_name = VALUES(category_name),
+                category_slug = VALUES(category_slug),
+                category_url = VALUES(category_url)
         """
 
         data = [
@@ -113,7 +117,7 @@ class CategoryService:
             logger.info(f"Inserted {rows_affected} categories into database")
             return rows_affected
         except MySQLError as e:
-            logger.error(f"Error bulk inserting categories: {e}")
+            logger.error(f"Error saving categories: {e}")
             return 0
 
     @staticmethod
