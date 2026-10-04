@@ -12,6 +12,7 @@ from rapidfuzz import fuzz, process
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from brand_detector import BrandDetector
 from config.settings import settings
 from scrapers.crypto import decrypt_json, encrypt_json
 
@@ -43,13 +44,12 @@ class ProductScraper:
         self.session.headers.update({"User-Agent": settings.USER_AGENT})
 
         self.known_brands = known_brands or []
-        self.brand_map = {}
-        for brand in self.known_brands:
-            brand_clean = re.sub(r"[^\w\s]", " ", brand)
-            brand_clean = re.sub(r"\s+", " ", brand_clean).strip().lower()
-            self.brand_map[brand_clean] = brand
+        self.brand_detector = BrandDetector(self.known_brands)
 
-        logger.info(f"Loaded {len(self.known_brands)} brands for matching")
+        logger.info(
+            "Loaded %s brands for matching",
+            len(self.known_brands),
+        )
 
     def _post_encrypted(self, url: str, body: dict, host: str) -> dict:
         """POST an encrypted body and decrypt the response envelope"""
@@ -91,39 +91,24 @@ class ProductScraper:
         return True, json.dumps(entries)
 
     def _extract_brand_from_name(self, product_name: str) -> str | None:
-        """Resolve a brand from the product name using progressively looser matching"""
-        if not product_name or not self.brand_map:
-            return None
+        """Resolve a canonical brand using exact or conservative typo matching."""
+        result = self.brand_detector.detect(product_name)
 
-        cleaned = product_name.replace("_", "")
-        cleaned = re.sub(r"[^\w\s]", " ", cleaned)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
-        cleaned_lower = cleaned.lower()
+        if result["status"] == "ambiguous":
+            logger.warning(
+                "Ambiguous brand for product %r: %s",
+                product_name,
+                result["candidates"],
+            )
+        elif result["method"] == "fuzzy":
+            logger.debug(
+                "Corrected product brand for %r to %s (similarity %.1f%%)",
+                product_name,
+                result["brand_name"],
+                result["similarity"],
+            )
 
-        for brand_clean, brand_original in self.brand_map.items():
-            pattern = r"\b" + re.escape(brand_clean) + r"\b"
-            if re.search(pattern, cleaned_lower):
-                return brand_original
-
-        words = cleaned_lower.split()
-        if words:
-            for num_words in [3, 2, 1]:
-                if len(words) >= num_words:
-                    candidate = " ".join(words[:num_words])
-                    best_match = process.extractOne(
-                        candidate,
-                        list(self.brand_map.keys()),
-                        scorer=fuzz.ratio,
-                        score_cutoff=88,
-                    )
-                    if best_match:
-                        return self.brand_map[best_match[0]]
-
-        for brand_clean, brand_original in self.brand_map.items():
-            if len(brand_clean) >= 4 and brand_clean in cleaned_lower:
-                return brand_original
-
-        return None
+        return result["brand_name"]
 
     def _parse_product(
         self,
