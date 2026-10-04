@@ -1,15 +1,3 @@
-"""Standalone brand matcher. No database, network, or third-party imports.
-
-Run from the repository root:
-    python brand_detector.py --self-test
-    python brand_detector.py --brands brands.txt --name "Grand_Seiko watch"
-    python brand_detector.py --brands brands.txt --titles product_titles.txt
-
-An optional aliases JSON file maps approved spellings to canonical names:
-    {"Dolce Gabbana": "Dolce & Gabbana"}
-Approximate matches are suggestions only; they never assign a brand.
-"""
-
 import argparse
 import json
 import re
