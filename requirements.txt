@@ -5,3 +5,4 @@ mysql-connector-python==26.7.0
 fastapi==0.141.1
 boto3==1.43.104
 uvicorn==0.54.0
+RapidFuzz==3.14.6

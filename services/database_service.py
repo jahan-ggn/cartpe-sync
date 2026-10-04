@@ -174,10 +174,10 @@ class ProductService:
             (store_id, store_name, external_product_id, product_name, product_url,
             image_url, source_image_url, product_images,
             current_price, original_price, has_variants, variants,
-            stock_status, is_active, short_description, description, attributes,
+            stock_status, is_active, brand_id, short_description, description,attributes,
             last_synced_at, created_at, updated_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
             updated_at = IF(
                 product_name <=> VALUES(product_name) AND
@@ -211,6 +211,7 @@ class ProductService:
             variants = VALUES(variants),
             stock_status = VALUES(stock_status),
             is_active = VALUES(is_active),
+            brand_id = VALUES(brand_id),
             short_description = VALUES(short_description),
             description = VALUES(description),
             attributes = VALUES(attributes),
@@ -218,6 +219,11 @@ class ProductService:
         """
 
         try:
+            for prod in products:
+                if not prod.get("brand_id") and prod.get("brand_name"):
+                    prod["brand_id"] = BrandService.get_or_create_brand(
+                        prod["brand_name"]
+                    )
             with DatabaseManager.get_connection() as conn:
                 cursor = conn.cursor(dictionary=True)
 
@@ -289,6 +295,7 @@ class ProductService:
                         prod.get("variants"),
                         prod.get("stock_status", "in_stock"),
                         True,
+                        prod.get("brand_id"),
                         prod.get("short_description"),
                         prod.get("description"),
                         attributes,
@@ -367,3 +374,51 @@ class ProductService:
         except MySQLError as e:
             logger.error(f"Error marking products inactive: {e}")
             return 0
+
+
+class BrandService:
+    """Brand-related database operations"""
+
+    @staticmethod
+    def get_all_brands() -> list[str]:
+        """Get all brand names from the database"""
+        results = DatabaseManager.execute_query(
+            "SELECT brand_name FROM brands", fetch=True
+        )
+        brands = [row["brand_name"] for row in results]
+        logger.info(f"Loaded {len(brands)} brands from database")
+        return brands
+
+    @staticmethod
+    def get_brand_id_by_name(brand_name: str) -> int | None:
+        """Get a brand's ID by exact name match"""
+        result = DatabaseManager.execute_query(
+            "SELECT brand_id FROM brands WHERE brand_name = %s",
+            (brand_name,),
+            fetch=True,
+        )
+        return result[0]["brand_id"] if result else None
+
+    @staticmethod
+    def get_or_create_brand(brand_name: str) -> int | None:
+        """Get a brand's ID, creating it if absent — race-safe"""
+        with DatabaseManager.get_connection() as conn:
+            cursor = conn.cursor(dictionary=True)
+            try:
+                cursor.execute(
+                    "INSERT IGNORE INTO brands (brand_name) VALUES (%s)",
+                    (brand_name,),
+                )
+                brand_id = cursor.lastrowid
+
+                if not brand_id:
+                    cursor.execute(
+                        "SELECT brand_id FROM brands WHERE brand_name = %s",
+                        (brand_name,),
+                    )
+                    row = cursor.fetchone()
+                    brand_id = row["brand_id"] if row else None
+            finally:
+                cursor.close()
+
+        return brand_id

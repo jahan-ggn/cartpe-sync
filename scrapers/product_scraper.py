@@ -2,11 +2,13 @@
 
 import json
 import logging
+import re
 import time
 from urllib.parse import urlsplit
 
 import requests
 from cryptography.exceptions import InvalidTag
+from rapidfuzz import fuzz, process
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -24,7 +26,7 @@ API_ERRORS = (requests.RequestException, ValueError, InvalidTag)
 class ProductScraper:
     """Scrapes products from the CartPE encrypted API"""
 
-    def __init__(self):
+    def __init__(self, known_brands: list[str] | None = None):
         self.session = requests.Session()
 
         retry_strategy = Retry(
@@ -39,6 +41,15 @@ class ProductScraper:
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
         self.session.headers.update({"User-Agent": settings.USER_AGENT})
+
+        self.known_brands = known_brands or []
+        self.brand_map = {}
+        for brand in self.known_brands:
+            brand_clean = re.sub(r"[^\w\s]", " ", brand)
+            brand_clean = re.sub(r"\s+", " ", brand_clean).strip().lower()
+            self.brand_map[brand_clean] = brand
+
+        logger.info(f"Loaded {len(self.known_brands)} brands for matching")
 
     def _post_encrypted(self, url: str, body: dict, host: str) -> dict:
         """POST an encrypted body and decrypt the response envelope"""
@@ -79,6 +90,41 @@ class ProductScraper:
             return False, None
         return True, json.dumps(entries)
 
+    def _extract_brand_from_name(self, product_name: str) -> str | None:
+        """Resolve a brand from the product name using progressively looser matching"""
+        if not product_name or not self.brand_map:
+            return None
+
+        cleaned = product_name.replace("_", "")
+        cleaned = re.sub(r"[^\w\s]", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        cleaned_lower = cleaned.lower()
+
+        for brand_clean, brand_original in self.brand_map.items():
+            pattern = r"\b" + re.escape(brand_clean) + r"\b"
+            if re.search(pattern, cleaned_lower):
+                return brand_original
+
+        words = cleaned_lower.split()
+        if words:
+            for num_words in [3, 2, 1]:
+                if len(words) >= num_words:
+                    candidate = " ".join(words[:num_words])
+                    best_match = process.extractOne(
+                        candidate,
+                        list(self.brand_map.keys()),
+                        scorer=fuzz.ratio,
+                        score_cutoff=88,
+                    )
+                    if best_match:
+                        return self.brand_map[best_match[0]]
+
+        for brand_clean, brand_original in self.brand_map.items():
+            if len(brand_clean) >= 4 and brand_clean in cleaned_lower:
+                return brand_original
+
+        return None
+
     def _parse_product(
         self,
         item: dict,
@@ -108,6 +154,7 @@ class ProductScraper:
 
             has_variants, variants = self._build_variants(item.get("sizes"))
             image_url = self._image_url(filename)
+            brand_name = self._extract_brand_from_name(product_name)
 
             product = {
                 "store_id": store_id,
@@ -127,6 +174,7 @@ class ProductScraper:
                 "stock_status": (
                     "in_stock" if item.get("stock") == 1 else "out_of_stock"
                 ),
+                "brand_name": brand_name,
             }
             return product, None
         except (AttributeError, KeyError, TypeError, ValueError) as e:

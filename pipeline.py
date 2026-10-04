@@ -8,7 +8,12 @@ from mysql.connector import Error as MySQLError
 
 from config.settings import settings
 from scrapers import CategoryScraper, ProductScraper
-from services.database_service import CategoryService, ProductService, StoreService
+from services.database_service import (
+    BrandService,
+    CategoryService,
+    ProductService,
+    StoreService,
+)
 from services.image_service import ImageService
 from services.push_orchestrator import PushOrchestrator
 
@@ -80,19 +85,21 @@ def run_category_scraping() -> bool:
     return failed == 0
 
 
-def scrape_category(store_data: dict, category: dict) -> tuple[str, dict | None, bool]:
+def scrape_category(
+    store_data: dict,
+    category: dict,
+    known_brands: list[str] | None = None,
+) -> tuple[str, dict | None, bool]:
     """Scrape every product in one category; returns (name, metrics or None, complete)"""
     category_name = category["category_name"]
     store_id = store_data["store_id"]
 
-    scraper = ProductScraper()
+    scraper = ProductScraper(known_brands=known_brands)
     try:
         products, complete = scraper.extract_products(store_data, category)
 
         if not products:
             if complete:
-                # Genuinely empty category: deactivate stale rows via the
-                # unified path so DB errors propagate instead of being swallowed
                 ProductService.bulk_upsert_products(
                     [], mark_inactive=(store_id, category["category_id"])
                 )
@@ -145,13 +152,16 @@ def scrape_store_products(
         logger.warning(f"No categories available for {store_name}")
         return (store_name, store_metrics, False, 0, 0)
 
+    known_brands = BrandService.get_all_brands()
+
     logger.info(f"Processing {len(categories)} categories for {store_name} (parallel)")
 
     failed_categories = 0
 
     with ThreadPoolExecutor(max_workers=settings.CATEGORY_WORKERS) as executor:
         futures = [
-            executor.submit(scrape_category, store_data, cat) for cat in categories
+            executor.submit(scrape_category, store_data, cat, known_brands)
+            for cat in categories
         ]
 
         for future in as_completed(futures):

@@ -34,6 +34,8 @@ FIELD_NAMES = [
     "updated_at",
     "has_variants",
     "variants",
+    "brand_id",
+    "brand_name",
     "short_description",
     "description",
     "attributes",
@@ -117,10 +119,12 @@ class CSVService:
                         p.current_price, p.original_price, p.stock_status, p.is_active,
                         p.last_synced_at, p.created_at, p.updated_at,
                         p.has_variants, p.variants,
+                        p.brand_id, b.brand_name,
                         p.short_description, p.description, p.attributes,
                         GROUP_CONCAT(DISTINCT c.category_id
                             ORDER BY c.category_id SEPARATOR ', ') as categories
                     FROM products p
+                    LEFT JOIN brands b ON p.brand_id = b.brand_id
                     LEFT JOIN product_categories pc ON p.id = pc.product_id
                     LEFT JOIN categories c ON pc.category_id = c.category_id
                     WHERE p.image_url IS NOT NULL AND p.image_url != ''
