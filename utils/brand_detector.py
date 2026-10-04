@@ -77,17 +77,21 @@ class BrandDetector:
         words = cleaned.split()
         matches = []
         fuzzy = []
+
         for name, phrase, brand_words, pattern in self.entries:
             matches.extend(
                 (match.start(), match.end(), name, "exact", 100.0)
                 for match in pattern.finditer(cleaned)
             )
+
             prefix = words[: len(brand_words)]
             if len(prefix) != len(brand_words):
                 continue
+
             differences = [(a, b) for a, b in zip(prefix, brand_words) if a != b]
             if len(differences) != 1:
                 continue
+
             supplied, canonical = differences[0]
             if (
                 supplied[0] != canonical[0]
@@ -95,19 +99,36 @@ class BrandDetector:
                 or not _one_edit(supplied, canonical)
             ):
                 continue
+
             candidate = " ".join(prefix)
             score = fuzz.ratio(phrase, candidate)
             fuzzy.append((0, len(candidate), name, "fuzzy", score))
 
-        ranked = sorted(fuzzy, key=lambda match: (-match[4], match[2]))
-        exact_prefix = any(match[0] == 0 for match in matches)
-        if ranked and ranked[0][4] >= self.min_similarity and not exact_prefix:
-            if len(ranked) > 1 and ranked[0][4] - ranked[1][4] < self.min_margin:
-                candidates = sorted({match[2] for match in matches + ranked})
-                return self._result(title, candidates)
-            matches.append(ranked[0])
+        # Prefer the longest exact brand at the beginning.
+        exact_prefix = [match for match in matches if match[0] == 0]
+        if exact_prefix:
+            longest_end = max(match[1] for match in exact_prefix)
+            longest = [match for match in exact_prefix if match[1] == longest_end]
+            candidates = sorted({match[2] for match in longest})
+            selected = longest[0] if len(candidates) == 1 else None
+            return self._result(title, candidates, selected)
 
-        # Discard a shorter phrase only when a longer match contains its span.
+        # Prefer a confident fuzzy prefix over later exact matches.
+        ranked = sorted(fuzzy, key=lambda match: (-match[4], match[2]))
+        if ranked and ranked[0][4] >= self.min_similarity:
+            if len(ranked) > 1 and ranked[0][4] - ranked[1][4] < self.min_margin:
+                candidates = sorted(
+                    {
+                        match[2]
+                        for match in ranked
+                        if ranked[0][4] - match[4] < self.min_margin
+                    }
+                )
+                return self._result(title, candidates)
+
+            return self._result(title, [ranked[0][2]], ranked[0])
+
+        # Otherwise, accept only a unique exact brand elsewhere.
         remaining = [
             match
             for match in matches

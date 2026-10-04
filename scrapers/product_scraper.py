@@ -335,3 +335,7 @@ class ProductScraper:
         )
 
         return all_products, complete
+
+    def close(self) -> None:
+        """Close the scraper's HTTP session."""
+        self.session.close()
