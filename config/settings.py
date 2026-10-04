@@ -33,6 +33,8 @@ class Settings:
     REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "0.5"))
     MAX_WORKERS = int(os.getenv("MAX_WORKERS", "5"))
     CATEGORY_WORKERS = int(os.getenv("CATEGORY_WORKERS", "5"))
+    BRAND_MIN_SIMILARITY = float(os.getenv("BRAND_MIN_SIMILARITY", "88"))
+    BRAND_MIN_MARGIN = float(os.getenv("BRAND_MIN_MARGIN", "8"))
     USER_AGENT = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -87,6 +89,12 @@ def validate_settings() -> None:
 
     if settings.CATEGORY_WORKERS < 1:
         errors.append("CATEGORY_WORKERS must be at least 1")
+
+    if not 0 < settings.BRAND_MIN_SIMILARITY <= 100:
+        errors.append("BRAND_MIN_SIMILARITY must be greater than 0 and at most 100")
+
+    if not 0 < settings.BRAND_MIN_MARGIN <= 100:
+        errors.append("BRAND_MIN_MARGIN must be greater than 0 and at most 100")
 
     if settings.IMAGE_WORKERS < 1:
         errors.append("IMAGE_WORKERS must be at least 1")

@@ -42,7 +42,11 @@ class ProductScraper:
         self.session.headers.update({"User-Agent": settings.USER_AGENT})
 
         self.known_brands = known_brands or {}
-        self.brand_detector = BrandDetector(list(self.known_brands))
+        self.brand_detector = BrandDetector(
+            list(self.known_brands),
+            min_similarity=settings.BRAND_MIN_SIMILARITY,
+            min_margin=settings.BRAND_MIN_MARGIN,
+        )
 
         logger.info(
             "Loaded %s brands for matching",
