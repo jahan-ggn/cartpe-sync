@@ -185,6 +185,7 @@ class ProductService:
                 current_price <=> VALUES(current_price) AND
                 original_price <=> VALUES(original_price) AND
                 stock_status <=> VALUES(stock_status) AND
+                brand_id <=> VALUES(brand_id) AND
                 source_image_url <=> VALUES(source_image_url) AND
                 has_variants <=> VALUES(has_variants) AND
                 variants <=> VALUES(variants) AND
@@ -219,11 +220,6 @@ class ProductService:
         """
 
         try:
-            for prod in products:
-                if not prod.get("brand_id") and prod.get("brand_name"):
-                    prod["brand_id"] = BrandService.get_or_create_brand(
-                        prod["brand_name"]
-                    )
             with DatabaseManager.get_connection() as conn:
                 cursor = conn.cursor(dictionary=True)
 
@@ -380,13 +376,15 @@ class BrandService:
     """Brand-related database operations"""
 
     @staticmethod
-    def get_all_brands() -> list[str]:
-        """Get all brand names from the database"""
-        results = DatabaseManager.execute_query(
-            "SELECT brand_name FROM brands", fetch=True
+    def get_all_brands() -> dict[str, int]:
+        """Load canonical brand names and their IDs."""
+        rows = DatabaseManager.execute_query(
+            "SELECT brand_id, brand_name FROM brands",
+            fetch=True,
         )
-        brands = [row["brand_name"] for row in results]
-        logger.info(f"Loaded {len(brands)} brands from database")
+        brands = {row["brand_name"]: row["brand_id"] for row in rows}
+
+        logger.info("Loaded %s brands from database", len(brands))
         return brands
 
     @staticmethod

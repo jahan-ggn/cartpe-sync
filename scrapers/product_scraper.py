@@ -2,19 +2,17 @@
 
 import json
 import logging
-import re
 import time
 from urllib.parse import urlsplit
 
 import requests
 from cryptography.exceptions import InvalidTag
-from rapidfuzz import fuzz, process
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from brand_detector import BrandDetector
 from config.settings import settings
 from scrapers.crypto import decrypt_json, encrypt_json
+from utils.brand_detector import BrandDetector
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +25,7 @@ API_ERRORS = (requests.RequestException, ValueError, InvalidTag)
 class ProductScraper:
     """Scrapes products from the CartPE encrypted API"""
 
-    def __init__(self, known_brands: list[str] | None = None):
+    def __init__(self, known_brands: dict[str, int] | None = None):
         self.session = requests.Session()
 
         retry_strategy = Retry(
@@ -43,8 +41,8 @@ class ProductScraper:
         self.session.mount("https://", adapter)
         self.session.headers.update({"User-Agent": settings.USER_AGENT})
 
-        self.known_brands = known_brands or []
-        self.brand_detector = BrandDetector(self.known_brands)
+        self.known_brands = known_brands or {}
+        self.brand_detector = BrandDetector(list(self.known_brands))
 
         logger.info(
             "Loaded %s brands for matching",
@@ -91,7 +89,7 @@ class ProductScraper:
         return True, json.dumps(entries)
 
     def _extract_brand_from_name(self, product_name: str) -> str | None:
-        """Resolve a canonical brand using exact or conservative typo matching."""
+        """Resolve a product title to a canonical brand when the match is clear."""
         result = self.brand_detector.detect(product_name)
 
         if result["status"] == "ambiguous":
@@ -102,7 +100,7 @@ class ProductScraper:
             )
         elif result["method"] == "fuzzy":
             logger.debug(
-                "Corrected product brand for %r to %s (similarity %.1f%%)",
+                "Corrected brand for %r to %s (similarity %.1f%%)",
                 product_name,
                 result["brand_name"],
                 result["similarity"],
@@ -140,6 +138,7 @@ class ProductScraper:
             has_variants, variants = self._build_variants(item.get("sizes"))
             image_url = self._image_url(filename)
             brand_name = self._extract_brand_from_name(product_name)
+            brand_id = self.known_brands.get(brand_name) if brand_name else None
 
             product = {
                 "store_id": store_id,
@@ -160,6 +159,7 @@ class ProductScraper:
                     "in_stock" if item.get("stock") == 1 else "out_of_stock"
                 ),
                 "brand_name": brand_name,
+                "brand_id": brand_id,
             }
             return product, None
         except (AttributeError, KeyError, TypeError, ValueError) as e:

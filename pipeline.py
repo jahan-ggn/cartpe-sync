@@ -88,7 +88,7 @@ def run_category_scraping() -> bool:
 def scrape_category(
     store_data: dict,
     category: dict,
-    known_brands: list[str] | None = None,
+    known_brands: dict[str, int] | None = None,
 ) -> tuple[str, dict | None, bool]:
     """Scrape every product in one category; returns (name, metrics or None, complete)"""
     category_name = category["category_name"]
@@ -135,6 +135,7 @@ def scrape_category(
 
 def scrape_store_products(
     store_data: dict,
+    known_brands: dict[str, int],
 ) -> tuple[str, dict, bool, int, int]:
     """Return (store name, metrics, complete, failed categories, total categories)."""
     store_id = store_data["store_id"]
@@ -151,8 +152,6 @@ def scrape_store_products(
     if not categories:
         logger.warning(f"No categories available for {store_name}")
         return (store_name, store_metrics, False, 0, 0)
-
-    known_brands = BrandService.get_all_brands()
 
     logger.info(f"Processing {len(categories)} categories for {store_name} (parallel)")
 
@@ -206,12 +205,16 @@ def run_product_scraping() -> bool:
         return False
 
     logger.info(f"Scraping products for {len(stores)} stores")
+    known_brands = BrandService.get_all_brands()
 
     successful, failed, total_products = 0, 0, 0
     failed_categories, total_categories = 0, 0
 
     with ThreadPoolExecutor(max_workers=settings.MAX_WORKERS) as executor:
-        futures = [executor.submit(scrape_store_products, store) for store in stores]
+        futures = [
+            executor.submit(scrape_store_products, store, known_brands)
+            for store in stores
+        ]
 
         for future in as_completed(futures):
             store_name, metrics, ok, n_failed, n_total = future.result()
