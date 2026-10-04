@@ -89,8 +89,6 @@ class BrandDetector:
             if len(differences) != 1:
                 continue
             supplied, canonical = differences[0]
-            # Preserve the first letter and reject corrections of short tokens.
-            # This constrains false positives without a hardcoded word list.
             if (
                 supplied[0] != canonical[0]
                 or min(len(supplied), len(canonical)) < 4

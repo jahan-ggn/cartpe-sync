@@ -373,7 +373,7 @@ class ProductService:
 
 
 class BrandService:
-    """Brand-related database operations"""
+    """Brand-related database operations."""
 
     @staticmethod
     def get_all_brands() -> dict[str, int]:
@@ -386,37 +386,3 @@ class BrandService:
 
         logger.info("Loaded %s brands from database", len(brands))
         return brands
-
-    @staticmethod
-    def get_brand_id_by_name(brand_name: str) -> int | None:
-        """Get a brand's ID by exact name match"""
-        result = DatabaseManager.execute_query(
-            "SELECT brand_id FROM brands WHERE brand_name = %s",
-            (brand_name,),
-            fetch=True,
-        )
-        return result[0]["brand_id"] if result else None
-
-    @staticmethod
-    def get_or_create_brand(brand_name: str) -> int | None:
-        """Get a brand's ID, creating it if absent — race-safe"""
-        with DatabaseManager.get_connection() as conn:
-            cursor = conn.cursor(dictionary=True)
-            try:
-                cursor.execute(
-                    "INSERT IGNORE INTO brands (brand_name) VALUES (%s)",
-                    (brand_name,),
-                )
-                brand_id = cursor.lastrowid
-
-                if not brand_id:
-                    cursor.execute(
-                        "SELECT brand_id FROM brands WHERE brand_name = %s",
-                        (brand_name,),
-                    )
-                    row = cursor.fetchone()
-                    brand_id = row["brand_id"] if row else None
-            finally:
-                cursor.close()
-
-        return brand_id
