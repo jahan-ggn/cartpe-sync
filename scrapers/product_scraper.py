@@ -129,11 +129,30 @@ class ProductScraper:
                 return None, "malformed_data"
             product_name = item.get("productName")
             filename = item.get("image")
-            if not product_name or not filename:
+            if (
+                not isinstance(product_name, str)
+                or not product_name.strip()
+                or not isinstance(filename, str)
+                or not filename.strip()
+            ):
+                site_slug = item.get("siteSlug")
+                product_url = (
+                    f"{base_url.rstrip('/')}/product-detail/{site_slug}"
+                    if isinstance(site_slug, str) and site_slug.strip()
+                    else None
+                )
+                logger.warning(
+                    "Skipping product with missing or invalid title/image: "
+                    "id=%r, productName=%r, image=%r, url=%s",
+                    item.get("id"),
+                    product_name,
+                    filename,
+                    product_url or "unavailable",
+                )
                 return None, "missing_fields"
 
             site_slug = item.get("siteSlug")
-            if not site_slug:
+            if not isinstance(site_slug, str) or not site_slug.strip():
                 logger.warning(
                     f"Skipping {item.get('id')} ({product_name}) - siteSlug not yet generated"
                 )
@@ -177,7 +196,7 @@ class ProductScraper:
 
         Returns (products, complete). Completeness requires valid pagination
         and a unique-ID count matching the reported total, including products
-        deliberately skipped because their slug is missing.
+        deliberately skipped because their title, image, or slug is missing.
         """
 
         store_id = store_data["store_id"]
@@ -195,7 +214,7 @@ class ProductScraper:
         page = 1
         complete = True
         reported_total: int | None = None
-        skipped_slug_ids: set[str] = set()
+        skipped_product_ids: set[str] = set()
 
         logger.info(f"Fetching products for {store_name} - {category_name}")
 
@@ -288,10 +307,12 @@ class ProductScraper:
                 product, reason = self._parse_product(
                     item, store_id, store_name, category_id, base_url
                 )
+
                 if product:
                     all_products.append(product)
                     seen_ids.add(product["external_product_id"])
-                elif reason == "no_slug":
+
+                elif reason in {"no_slug", "missing_fields"}:
                     external_id = item.get("id")
                     if (
                         isinstance(external_id, bool)
@@ -299,13 +320,26 @@ class ProductScraper:
                         or not str(external_id).strip()
                     ):
                         logger.warning(
-                            f"Slug-less product has an invalid ID in {category_name}"
+                            "Skipped product has an invalid ID in %s / %s: "
+                            "reason=%s",
+                            store_name,
+                            category_name,
+                            reason,
                         )
                         complete = False
                     else:
-                        skipped_slug_ids.add(str(external_id))
+                        skipped_product_ids.add(str(external_id))
+
                 else:
                     complete = False
+                    logger.warning(
+                        "Product skipped in %s / %s, page %s: " "id=%r, reason=%s",
+                        store_name,
+                        category_name,
+                        page,
+                        item.get("id") if isinstance(item, dict) else None,
+                        reason,
+                    )
 
             logger.info(f"Page {page}: parsed {len(items)} products")
 
@@ -315,7 +349,7 @@ class ProductScraper:
             page += 1
             time.sleep(settings.REQUEST_DELAY)
 
-        accounted_ids = seen_ids | skipped_slug_ids
+        accounted_ids = seen_ids | skipped_product_ids
 
         if (
             complete
@@ -331,7 +365,7 @@ class ProductScraper:
         logger.info(
             f"Total products extracted for {category_name}: "
             f"{len(all_products)} "
-            f"(complete={complete}, skipped_no_slug={len(skipped_slug_ids)})"
+            f"(complete={complete}, skipped_products={len(skipped_product_ids)})"
         )
 
         return all_products, complete
