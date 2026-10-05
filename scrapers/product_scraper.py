@@ -31,7 +31,7 @@ class ProductScraper:
         retry_strategy = Retry(
             total=3,
             backoff_factor=3,
-            status_forcelist=[429, 502, 503, 504],
+            status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["GET", "POST"],
         )
         adapter = HTTPAdapter(
@@ -195,8 +195,8 @@ class ProductScraper:
         """Extract products for a category, paging until exhausted.
 
         Returns (products, complete). Completeness requires valid pagination
-        and a unique-ID count matching the reported total, including products
-        deliberately skipped because their title, image, or slug is missing.
+        and a distinct-listing count matching the reported total, including
+        deliberately skipped products. Products are deduplicated by source ID.
         """
 
         store_id = store_data["store_id"]
@@ -210,7 +210,9 @@ class ProductScraper:
 
         api_url = f"{base_url}/api/category-products"
         all_products: list[dict] = []
-        seen_ids: set = set()
+        products_by_id: dict[str, dict] = {}
+        accounted_listings: set[tuple[str, str | None]] = set()
+        first_page_by_id: dict[str, int] = {}
         page = 1
         complete = True
         reported_total: int | None = None
@@ -304,13 +306,85 @@ class ProductScraper:
                 break
 
             for item in items:
+                if isinstance(item, dict):
+                    external_id = item.get("id")
+                    if (
+                        isinstance(external_id, (str, int))
+                        and not isinstance(external_id, bool)
+                        and str(external_id).strip()
+                    ):
+                        product_id = str(external_id)
+                        if product_id in first_page_by_id:
+                            logger.warning(
+                                "Repeated product ID in %s / %s: "
+                                "id=%s, first_page=%s, repeated_page=%s",
+                                store_name,
+                                category_name,
+                                product_id,
+                                first_page_by_id[product_id],
+                                page,
+                            )
+                        else:
+                            first_page_by_id[product_id] = page
+
+                if isinstance(item, dict):
+                    external_id = item.get("id")
+                    if (
+                        isinstance(external_id, (str, int))
+                        and not isinstance(external_id, bool)
+                        and str(external_id).strip()
+                    ):
+                        site_slug = item.get("siteSlug")
+                        listing_slug = (
+                            site_slug
+                            if isinstance(site_slug, str) and site_slug.strip()
+                            else None
+                        )
+                        accounted_listings.add((str(external_id), listing_slug))
                 product, reason = self._parse_product(
                     item, store_id, store_name, category_id, base_url
                 )
 
                 if product:
-                    all_products.append(product)
-                    seen_ids.add(product["external_product_id"])
+                    product_id = product["external_product_id"]
+                    existing = products_by_id.get(product_id)
+
+                    if existing is None:
+                        products_by_id[product_id] = product
+                        all_products.append(product)
+                    else:
+                        # Different URLs may represent the same source product.
+                        existing_fields = {
+                            key: value
+                            for key, value in existing.items()
+                            if key not in {"product_url", "site_slug"}
+                        }
+                        incoming_fields = {
+                            key: value
+                            for key, value in product.items()
+                            if key not in {"product_url", "site_slug"}
+                        }
+
+                        if existing_fields != incoming_fields:
+                            complete = False
+                            differences = {
+                                key: {
+                                    "first": existing_fields.get(key),
+                                    "duplicate": incoming_fields.get(key),
+                                }
+                                for key in (
+                                    existing_fields.keys() | incoming_fields.keys()
+                                )
+                                if existing_fields.get(key) != incoming_fields.get(key)
+                            }
+                            logger.warning(
+                                "Conflicting duplicate product in %s / %s: "
+                                "id=%s, differences=%r",
+                                store_name,
+                                category_name,
+                                product_id,
+                                differences,
+                            )
 
                 elif reason in {"no_slug", "missing_fields"}:
                     external_id = item.get("id")
@@ -349,16 +423,26 @@ class ProductScraper:
             page += 1
             time.sleep(settings.REQUEST_DELAY)
 
-        accounted_ids = seen_ids | skipped_product_ids
+        logger.info(
+            "Listing accounting for %s / %s: "
+            "distinct_listings=%s, reported_total=%s",
+            store_name,
+            category_name,
+            len(accounted_listings),
+            reported_total,
+        )
 
         if (
             complete
             and reported_total is not None
-            and len(accounted_ids) != reported_total
+            and len(accounted_listings) != reported_total
         ):
             logger.warning(
-                f"Accounted for {len(accounted_ids)} unique products in "
-                f"{category_name}, but API reported total={reported_total}"
+                "Accounted for %s distinct listings in %s, "
+                "but API reported total=%s",
+                len(accounted_listings),
+                category_name,
+                reported_total,
             )
             complete = False
 
