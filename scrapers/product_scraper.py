@@ -217,6 +217,9 @@ class ProductScraper:
         complete = True
         reported_total: int | None = None
         skipped_product_ids: set[str] = set()
+        received_entries = 0
+        duplicate_counts: dict[str, int] = {}
+        skipped_reasons: dict[str, str] = {}
 
         logger.info(f"Fetching products for {store_name} - {category_name}")
 
@@ -305,6 +308,8 @@ class ProductScraper:
                     complete = False
                 break
 
+            received_entries += len(items)
+
             for item in items:
                 if isinstance(item, dict):
                     external_id = item.get("id")
@@ -315,6 +320,9 @@ class ProductScraper:
                     ):
                         product_id = str(external_id)
                         if product_id in first_page_by_id:
+                            duplicate_counts[product_id] = (
+                                duplicate_counts.get(product_id, 0) + 1
+                            )
                             logger.warning(
                                 "Repeated product ID in %s / %s: "
                                 "id=%s, first_page=%s, repeated_page=%s",
@@ -403,6 +411,7 @@ class ProductScraper:
                         complete = False
                     else:
                         skipped_product_ids.add(str(external_id))
+                        skipped_reasons[str(external_id)] = reason
 
                 else:
                     complete = False
@@ -422,6 +431,39 @@ class ProductScraper:
 
             page += 1
             time.sleep(settings.REQUEST_DELAY)
+
+        logger.info(
+            "Scrape accounting for %s / %s: "
+            "reported_total=%s, received_entries=%s, "
+            "unique_product_ids=%s, distinct_id_slug_pairs=%s, "
+            "duplicate_occurrences=%s, extracted_products=%s, "
+            "intentionally_skipped_ids=%s",
+            store_name,
+            category_name,
+            reported_total,
+            received_entries,
+            len(first_page_by_id),
+            len(accounted_listings),
+            sum(duplicate_counts.values()),
+            len(all_products),
+            len(skipped_product_ids),
+        )
+
+        if duplicate_counts:
+            logger.warning(
+                "Duplicate IDs for %s / %s " "(ID: extra occurrences): %s",
+                store_name,
+                category_name,
+                duplicate_counts,
+            )
+
+        if skipped_reasons:
+            logger.warning(
+                "Intentionally skipped IDs for %s / %s " "(ID: reason): %s",
+                store_name,
+                category_name,
+                skipped_reasons,
+            )
 
         logger.info(
             "Listing accounting for %s / %s: "

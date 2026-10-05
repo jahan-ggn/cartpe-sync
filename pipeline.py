@@ -16,6 +16,7 @@ from services.database_service import (
 )
 from services.image_service import ImageService
 from services.push_orchestrator import PushOrchestrator
+from services.snapshot_service import SnapshotService
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,9 @@ def scrape_and_save_categories(store_data: dict) -> tuple[str, int, bool]:
         scraper.close()
 
 
-def run_category_scraping() -> bool:
-    """Scrape categories for every CartPE store"""
+def run_category_scraping() -> set[int]:
+    """Return IDs of stores whose category scraping succeeded."""
+
     logger.info("=" * 80)
     logger.info("STEP 1: Category Scraping")
     logger.info("=" * 80)
@@ -60,18 +62,23 @@ def run_category_scraping() -> bool:
     stores = StoreService.get_all_stores("cartpe")
     if not stores:
         logger.warning("No CartPE stores configured; pipeline will not proceed")
-        return False
+        return set()
 
     logger.info(f"Scraping categories for {len(stores)} stores")
 
     successful, failed, total = 0, 0, 0
+    successful_store_ids = set()
 
     with ThreadPoolExecutor(max_workers=settings.MAX_WORKERS) as executor:
-        futures = [executor.submit(scrape_and_save_categories, s) for s in stores]
+        futures = {
+            executor.submit(scrape_and_save_categories, store): store["store_id"]
+            for store in stores
+        }
 
         for future in as_completed(futures):
             store_name, count, ok = future.result()
             if ok:
+                successful_store_ids.add(futures[future])
                 successful += 1
                 total += count
                 logger.info(f"Categories scraped: {store_name} ({count})")
@@ -82,7 +89,7 @@ def run_category_scraping() -> bool:
     logger.info(
         f"Category scraping complete: {total} categories from {successful} stores\n"
     )
-    return failed == 0
+    return successful_store_ids
 
 
 def scrape_category(
@@ -193,28 +200,36 @@ def scrape_store_products(
     )
 
 
-def run_product_scraping() -> bool:
-    """Scrape products for every CartPE store."""
+def run_product_scraping(eligible_store_ids: set[int]) -> set[int]:
+    """Scrape eligible stores and return successfully completed store IDs."""
+
     logger.info("=" * 80)
     logger.info("STEP 2: Product Scraping")
     logger.info("=" * 80)
 
-    stores = StoreService.get_all_stores("cartpe")
+    stores = [
+        store
+        for store in StoreService.get_all_stores("cartpe")
+        if store["store_id"] in eligible_store_ids
+    ]
     if not stores:
         logger.warning("No stores available for product scraping")
-        return False
+        return set()
 
     logger.info(f"Scraping products for {len(stores)} stores")
     known_brands = BrandService.get_all_brands()
+    completed_store_ids = set()
 
     successful, failed, total_products = 0, 0, 0
     failed_categories, total_categories = 0, 0
 
     with ThreadPoolExecutor(max_workers=settings.MAX_WORKERS) as executor:
-        futures = [
-            executor.submit(scrape_store_products, store, known_brands)
+        futures = {
+            executor.submit(scrape_store_products, store, known_brands): store[
+                "store_id"
+            ]
             for store in stores
-        ]
+        }
 
         for future in as_completed(futures):
             store_name, metrics, ok, n_failed, n_total = future.result()
@@ -224,6 +239,7 @@ def run_product_scraping() -> bool:
             total_products += metrics["total"]
 
             if ok:
+                completed_store_ids.add(futures[future])
                 successful += 1
                 logger.info(
                     f"Products scraped: {store_name} "
@@ -258,7 +274,7 @@ def run_product_scraping() -> bool:
         f"{failed} stores incomplete or failed"
     )
 
-    return failed == 0
+    return completed_store_ids
 
 
 def run_pipeline() -> None:
@@ -268,17 +284,8 @@ def run_pipeline() -> None:
     logger.info("*" * 80)
 
     try:
-        if not run_category_scraping():
-            raise RuntimeError(
-                "Category scraping failed; aborting pipeline before product scraping and push"
-            )
-
-        if not run_product_scraping():
-            logger.warning(
-                "Product scraping had failures; continuing to image processing "
-                "and push. Subscribers may receive previously stored stock data "
-                "for incomplete or failed stores/categories."
-            )
+        category_complete_store_ids = run_category_scraping()
+        completed_store_ids = run_product_scraping(category_complete_store_ids)
 
         logger.info("=" * 80)
         logger.info("STEP 3: Image Processing")
@@ -294,6 +301,19 @@ def run_pipeline() -> None:
 
         logger.info("=" * 80)
         logger.info("STEP 4: Pushing Data to Subscriptions")
+        logger.info("Saving complete store snapshots")
+        for store_id in sorted(completed_store_ids):
+            try:
+                products = SnapshotService.get_store_export_products(store_id)
+                SnapshotService.save_store_snapshot(store_id, products)
+                logger.info(
+                    f"Saved snapshot for store {store_id}: " f"{len(products)} products"
+                )
+            except (MySQLError, ValueError, TypeError):
+                logger.exception(
+                    f"Snapshot save failed for store {store_id}; "
+                    "keeping its previous snapshot"
+                )
         logger.info("=" * 80)
 
         try:
