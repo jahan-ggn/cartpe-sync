@@ -51,7 +51,7 @@ class Settings:
 
     # CartPE encrypted API
     CARTPE_KEY_SOURCE = os.getenv("CARTPE_KEY_SOURCE", "")
-    CARTPE_PER_PAGE = int(os.getenv("CARTPE_PER_PAGE", "16"))
+    CARTPE_PER_PAGE = int(os.getenv("CARTPE_PER_PAGE", "100"))
 
     # Subscription (single plan)
     SUBSCRIPTION_DAYS = int(os.getenv("SUBSCRIPTION_DAYS", "30"))
@@ -89,6 +89,9 @@ def validate_settings() -> None:
 
     if settings.CATEGORY_WORKERS < 1:
         errors.append("CATEGORY_WORKERS must be at least 1")
+
+    if not 1 <= settings.CARTPE_PER_PAGE <= 100:
+        errors.append("CARTPE_PER_PAGE must be between 1 and 100")
 
     if not 0 < settings.BRAND_MIN_SIMILARITY <= 100:
         errors.append("BRAND_MIN_SIMILARITY must be greater than 0 and at most 100")
