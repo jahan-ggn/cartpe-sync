@@ -403,11 +403,16 @@ class ProductScraper:
                 reported_total = total
             elif total != reported_total:
                 logger.warning(
-                    f"Reported total changed for {category_name}: "
-                    f"{reported_total} -> {total} (page {page})"
+                    "Reported total changed for %s / %s: %s -> %s (page %s); "
+                    "continuing collection without deactivation",
+                    store_name,
+                    category_name,
+                    reported_total,
+                    total,
+                    page,
                 )
+                reported_total = total
                 complete = False
-                break
 
             if not items:
                 if total == 0 and not has_more:
