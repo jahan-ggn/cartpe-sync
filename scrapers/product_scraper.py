@@ -308,7 +308,6 @@ class ProductScraper:
         accounted_listings: set[tuple[str, str | None]] = set()
         first_page_by_id: dict[str, int] = {}
         page = 1
-        page_limit: int | None = None
         consecutive_request_failures = 0
         complete = True
         reported_total: int | None = None
@@ -319,7 +318,7 @@ class ProductScraper:
 
         logger.info(f"Fetching products for {store_name} - {category_name}")
 
-        while page_limit is None or page <= page_limit:
+        while True:
             request_data = {
                 "slug": [category_slug],
                 "category_type": ["category"],
@@ -349,10 +348,9 @@ class ProductScraper:
                 complete = False
                 consecutive_request_failures += 1
 
-                if reported_total is None and consecutive_request_failures >= 3:
+                if consecutive_request_failures >= 3:
                     logger.warning(
-                        "Stopping %s / %s after three consecutive failed "
-                        "pages without a known product total",
+                        "Stopping %s / %s after three consecutive failed pages",
                         store_name,
                         category_name,
                     )
@@ -403,10 +401,6 @@ class ProductScraper:
 
             if reported_total is None:
                 reported_total = total
-                page_limit = max(
-                    1,
-                    (total + settings.CARTPE_PER_PAGE - 1) // settings.CARTPE_PER_PAGE,
-                )
             elif total != reported_total:
                 logger.warning(
                     f"Reported total changed for {category_name}: "
@@ -549,16 +543,6 @@ class ProductScraper:
 
             page += 1
             time.sleep(settings.REQUEST_DELAY)
-
-        else:
-            complete = False
-            logger.warning(
-                "Reached the expected page limit without normal "
-                "pagination completion for %s / %s: limit=%s",
-                store_name,
-                category_name,
-                page_limit,
-            )
 
         logger.info(
             "Scrape accounting for %s / %s: "
