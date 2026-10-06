@@ -137,7 +137,7 @@ async def manual_push(subscription_id: int) -> dict:
     if not csv_path:
         raise HTTPException(
             status_code=404,
-            detail="No active subscription or no eligible stores to export",
+            detail="Subscription inactive, no selected stores, or no exportable products",
         )
 
     if not CSVService.upload_csv(csv_path, subscription_id):

@@ -47,9 +47,9 @@ class PushOrchestrator:
             if csv_path is None:
                 results["skipped"] += 1
                 logger.warning(
-                    f"Push skipped for {buyer_domain}: "
-                    "no active subscription, no selected stores, "
-                    "or no stores with a recorded complete scrape"
+                    "Push skipped for %s: subscription inactive, "
+                    "no selected stores, or no exportable products",
+                    buyer_domain,
                 )
                 continue
 

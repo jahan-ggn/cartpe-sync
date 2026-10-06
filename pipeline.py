@@ -16,7 +16,6 @@ from services.database_service import (
 )
 from services.image_service import ImageService
 from services.push_orchestrator import PushOrchestrator
-from services.snapshot_service import SnapshotService
 
 logger = logging.getLogger(__name__)
 
@@ -182,15 +181,6 @@ def scrape_store_products(
                     f"Category incomplete or failed: " f"{store_name} / {category_name}"
                 )
 
-    if failed_categories == 0:
-        try:
-            StoreService.mark_product_scrape_complete(store_id)
-        except MySQLError:
-            logger.exception(
-                f"Products scraped successfully for {store_name}, "
-                "but the completion timestamp could not be saved; continuing"
-            )
-
     return (
         store_name,
         store_metrics,
@@ -200,8 +190,8 @@ def scrape_store_products(
     )
 
 
-def run_product_scraping(eligible_store_ids: set[int]) -> set[int]:
-    """Scrape eligible stores and return successfully completed store IDs."""
+def run_product_scraping(eligible_store_ids: set[int]) -> None:
+    """Scrape eligible stores and report complete and partial results."""
 
     logger.info("=" * 80)
     logger.info("STEP 2: Product Scraping")
@@ -214,11 +204,10 @@ def run_product_scraping(eligible_store_ids: set[int]) -> set[int]:
     ]
     if not stores:
         logger.warning("No stores available for product scraping")
-        return set()
+        return
 
     logger.info(f"Scraping products for {len(stores)} stores")
     known_brands = BrandService.get_all_brands()
-    completed_store_ids = set()
 
     successful, failed, total_products = 0, 0, 0
     failed_categories, total_categories = 0, 0
@@ -239,7 +228,6 @@ def run_product_scraping(eligible_store_ids: set[int]) -> set[int]:
             total_products += metrics["total"]
 
             if ok:
-                completed_store_ids.add(futures[future])
                 successful += 1
                 logger.info(
                     f"Products scraped: {store_name} "
@@ -274,8 +262,6 @@ def run_product_scraping(eligible_store_ids: set[int]) -> set[int]:
         f"{failed} stores incomplete or failed"
     )
 
-    return completed_store_ids
-
 
 def run_pipeline() -> None:
     """Run the full CartPE scraping pipeline"""
@@ -285,7 +271,7 @@ def run_pipeline() -> None:
 
     try:
         category_complete_store_ids = run_category_scraping()
-        completed_store_ids = run_product_scraping(category_complete_store_ids)
+        run_product_scraping(category_complete_store_ids)
 
         logger.info("=" * 80)
         logger.info("STEP 3: Image Processing")
@@ -301,19 +287,6 @@ def run_pipeline() -> None:
 
         logger.info("=" * 80)
         logger.info("STEP 4: Pushing Data to Subscriptions")
-        logger.info("Saving complete store snapshots")
-        for store_id in sorted(completed_store_ids):
-            try:
-                products = SnapshotService.get_store_export_products(store_id)
-                SnapshotService.save_store_snapshot(store_id, products)
-                logger.info(
-                    f"Saved snapshot for store {store_id}: " f"{len(products)} products"
-                )
-            except (MySQLError, ValueError, TypeError):
-                logger.exception(
-                    f"Snapshot save failed for store {store_id}; "
-                    "keeping its previous snapshot"
-                )
         logger.info("=" * 80)
 
         try:

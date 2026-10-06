@@ -1,7 +1,6 @@
 """CSV generation service for subscription data"""
 
 import csv
-import json
 import logging
 import shutil
 from pathlib import Path
@@ -50,81 +49,99 @@ class CSVService:
 
     @staticmethod
     def generate_csv_for_subscription(subscription_id: int) -> str | None:
-        """Generate a subscription CSV from saved complete store snapshots."""
-
+        """Export current active, in-stock inventory for selected stores."""
         try:
             with DatabaseManager.get_connection() as conn:
                 cursor = conn.cursor(dictionary=True)
+                try:
+                    cursor.execute(
+                        """SELECT id
+                        FROM api_subscriptions
+                        WHERE id = %s AND expires_at > NOW()""",
+                        (subscription_id,),
+                    )
+                    if cursor.fetchone() is None:
+                        logger.warning(
+                            "No active subscription found: %s",
+                            subscription_id,
+                        )
+                        return None
 
-                cursor.execute(
-                    """SELECT buyer_domain
-                    FROM api_subscriptions
-                    WHERE id = %s AND expires_at > NOW()""",
-                    (subscription_id,),
-                )
-                subscription = cursor.fetchone()
-
-                if not subscription:
-                    logger.warning(f"No active subscription found: {subscription_id}")
-                    return None
-
-                cursor.execute(
-                    """SELECT s.store_id, snap.completed_at
+                    cursor.execute(
+                        """SELECT sp.store_id
                         FROM subscription_permissions sp
                         JOIN stores s ON s.store_id = sp.store_id
-                        LEFT JOIN store_export_snapshots snap
-                            ON snap.store_id = s.store_id
                         WHERE sp.subscription_id = %s
-                        ORDER BY s.store_id""",
-                    (subscription_id,),
-                )
-                selected_stores = cursor.fetchall()
-
-                if not selected_stores:
-                    logger.warning(
-                        f"No selected stores available for subscription {subscription_id}"
+                        ORDER BY sp.store_id""",
+                        (subscription_id,),
                     )
-                    return None
+                    store_ids = [row["store_id"] for row in cursor.fetchall()]
 
-                eligible_store_ids = [
-                    row["store_id"]
-                    for row in selected_stores
-                    if row["completed_at"] is not None
-                ]
-                excluded_store_ids = [
-                    row["store_id"]
-                    for row in selected_stores
-                    if row["completed_at"] is None
-                ]
+                    if not store_ids:
+                        logger.warning(
+                            "No selected stores available for subscription %s",
+                            subscription_id,
+                        )
+                        return None
 
-                if excluded_store_ids:
-                    logger.warning(
-                        f"Subscription {subscription_id}: skipping stores "
-                        f"without a saved complete snapshot: {excluded_store_ids}"
+                    placeholders = ", ".join(["%s"] * len(store_ids))
+                    cursor.execute(
+                        f"""
+                        SELECT
+                            p.id,
+                            p.store_id,
+                            p.store_name,
+                            p.external_product_id AS product_id,
+                            p.product_name,
+                            p.product_url,
+                            p.image_url,
+                            p.product_images,
+                            p.current_price,
+                            p.original_price,
+                            p.stock_status,
+                            p.is_active,
+                            p.last_synced_at,
+                            p.created_at,
+                            p.updated_at,
+                            p.has_variants,
+                            p.variants,
+                            p.brand_id,
+                            b.brand_name,
+                            p.short_description,
+                            p.description,
+                            p.attributes,
+                            GROUP_CONCAT(
+                                DISTINCT c.category_id
+                                ORDER BY c.category_id
+                                SEPARATOR ', '
+                            ) AS categories
+                        FROM products p
+                        LEFT JOIN brands b ON p.brand_id = b.brand_id
+                        LEFT JOIN product_categories pc ON p.id = pc.product_id
+                        LEFT JOIN categories c ON pc.category_id = c.category_id
+                        WHERE p.store_id IN ({placeholders})
+                            AND p.is_active = 1
+                            AND p.stock_status = 'in_stock'
+                            AND p.image_url IS NOT NULL
+                            AND p.image_url != ''
+                            AND p.product_name IS NOT NULL
+                            AND TRIM(p.product_name) != ''
+                            AND p.product_url IS NOT NULL
+                            AND TRIM(p.product_url) != ''
+                        GROUP BY p.id
+                        ORDER BY p.store_id, p.id
+                        """,
+                        tuple(store_ids),
                     )
-
-                if not eligible_store_ids:
-                    logger.warning(
-                        f"Subscription {subscription_id}: no stores eligible for export"
-                    )
-                    return None
-
-                placeholders = ", ".join(["%s"] * len(eligible_store_ids))
-
-                cursor.execute(
-                    f"""SELECT row_data
-                    FROM store_export_snapshot_products
-                    WHERE store_id IN ({placeholders})
-                    ORDER BY store_id, product_id""",
-                    tuple(eligible_store_ids),
-                )
-
-                products = [json.loads(row["row_data"]) for row in cursor.fetchall()]
+                    products = cursor.fetchall()
+                finally:
+                    cursor.close()
 
             if not products:
                 logger.info(
-                    f"Skipping CSV export for subscription {subscription_id}: "
-                    "no exportable products"
+                    "Skipping CSV export for subscription %s: "
+                    "no exportable products",
+                    subscription_id,
                 )
                 return None
 
@@ -138,30 +155,36 @@ class CSVService:
 
             try:
                 with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
-                    writer = csv.DictWriter(csvfile, fieldnames=FIELD_NAMES)
+                    writer = csv.DictWriter(
+                        csvfile,
+                        fieldnames=FIELD_NAMES,
+                    )
                     writer.writeheader()
                     writer.writerows(products)
-
             except (OSError, ValueError, TypeError, csv.Error) as e:
                 try:
                     csv_path.unlink(missing_ok=True)
                 except OSError:
-                    logger.exception("Could not remove incomplete CSV: %s", csv_path)
-
+                    logger.exception(
+                        "Could not remove incomplete CSV: %s",
+                        csv_path,
+                    )
                 raise ValueError(
                     f"Could not write export for subscription {subscription_id}"
                 ) from e
 
             logger.info(
-                f"Generated CSV for subscription {subscription_id}: "
-                f"{len(products)} products"
+                "Generated CSV for subscription %s: %s products",
+                subscription_id,
+                len(products),
             )
             return str(csv_path)
 
         except (MySQLError, OSError, ValueError) as e:
             logger.error(
-                f"Error generating CSV for subscription {subscription_id}: "
-                f"{type(e).__name__}"
+                "Error generating CSV for subscription %s: %s",
+                subscription_id,
+                type(e).__name__,
             )
             raise
 
@@ -206,23 +229,22 @@ class CSVService:
                 f"{row['buyer_domain'].rstrip('/')}" "/wp-json/product-sync/v1/products"
             )
 
-            with open(csv_path, "rb") as csv_file:
-                with requests.post(
-                    api_url,
-                    params={
-                        "consumer_key": row["consumer_key"],
-                        "consumer_secret": row["consumer_secret"],
-                    },
-                    files={
-                        "file": (
-                            Path(csv_path).name,
-                            csv_file,
-                            "text/csv",
-                        )
-                    },
-                    timeout=60,
-                ) as response:
-                    response.raise_for_status()
+            with open(csv_path, "rb") as csv_file, requests.post(
+                api_url,
+                params={
+                    "consumer_key": row["consumer_key"],
+                    "consumer_secret": row["consumer_secret"],
+                },
+                files={
+                    "file": (
+                        Path(csv_path).name,
+                        csv_file,
+                        "text/csv",
+                    )
+                },
+                timeout=60,
+            ) as response:
+                response.raise_for_status()
 
             logger.info(f"CSV uploaded successfully for subscription {subscription_id}")
             return True

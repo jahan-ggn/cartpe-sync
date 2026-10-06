@@ -75,16 +75,6 @@ class StoreService:
         logger.info(f"Created store: {store_data['store_name']}")
         return {"success": True, "store_id": store_id}
 
-    @staticmethod
-    def mark_product_scrape_complete(store_id: int) -> None:
-        """Record when every category in a store completed successfully."""
-        DatabaseManager.execute_query(
-            """UPDATE stores
-            SET last_complete_product_scrape_at = %s
-            WHERE store_id = %s""",
-            (now(), store_id),
-        )
-
 
 class CategoryService:
     """Category-related database operations"""
