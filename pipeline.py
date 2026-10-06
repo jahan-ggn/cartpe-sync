@@ -242,10 +242,14 @@ def run_product_scraping(eligible_store_ids: set[int]) -> None:
                         f"Products failed: {store_name} " "— no categories available"
                     )
                 else:
-                    logger.error(
-                        f"Products failed: {store_name} "
-                        f"({n_failed}/{n_total} categories incomplete or failed; "
-                        f"{metrics['total']} products upserted)"
+                    logger.warning(
+                        "Product scraping incomplete for %s: "
+                        "%s/%s categories incomplete or failed; "
+                        "%s products upserted. Store remains eligible for export.",
+                        store_name,
+                        n_failed,
+                        n_total,
+                        metrics["total"],
                     )
 
     if failed:
