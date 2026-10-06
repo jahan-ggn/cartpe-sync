@@ -2,6 +2,7 @@
 
 import json
 import logging
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -21,6 +22,33 @@ GALLERY_MD = "gallery_md"
 
 API_ERRORS = (requests.RequestException, ValueError, InvalidTag)
 
+_WAF_CONDITION = threading.Condition()
+_waf_resume_at = 0.0
+
+WAF_COOLDOWNS = (60, 120, 240)
+
+
+def _wait_for_waf_cooldown() -> None:
+    """Pause new product requests until the shared cooldown expires."""
+    with _WAF_CONDITION:
+        while True:
+            remaining = _waf_resume_at - time.monotonic()
+            if remaining <= 0:
+                return
+            _WAF_CONDITION.wait(timeout=min(remaining, 60))
+
+
+def _extend_waf_cooldown(seconds: int) -> None:
+    """Extend the cooldown shared by all product scraper threads."""
+    global _waf_resume_at
+
+    with _WAF_CONDITION:
+        _waf_resume_at = max(
+            _waf_resume_at,
+            time.monotonic() + seconds,
+        )
+        _WAF_CONDITION.notify_all()
+
 
 class ProductScraper:
     """Scrapes products from the CartPE encrypted API"""
@@ -31,9 +59,11 @@ class ProductScraper:
         retry_strategy = Retry(
             total=3,
             backoff_factor=3,
-            status_forcelist=[202, 429, 500, 502, 503, 504],
+            status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["GET", "POST"],
+            raise_on_status=False,
         )
+
         adapter = HTTPAdapter(
             pool_connections=30, pool_maxsize=30, max_retries=retry_strategy
         )
@@ -54,21 +84,85 @@ class ProductScraper:
         )
 
     def _post_encrypted(self, url: str, body: dict, host: str) -> dict:
-        """POST an encrypted body and decrypt the response envelope"""
-        response = self.session.post(
-            url,
-            json=encrypt_json(body),
-            headers={"X-Tenant-Host": host, "Accept": "application/json"},
-            timeout=settings.REQUEST_TIMEOUT,
-        )
-        response.raise_for_status()
-        if "application/json" not in response.headers.get("content-type", ""):
-            raise ValueError(
-                f"{url} returned {response.status_code} "
-                f"({response.headers.get('content-type')}): {response.text[:120]!r}"
+        """Request a page with shared cooldowns for WAF challenges."""
+        for attempt in range(len(WAF_COOLDOWNS) + 1):
+            _wait_for_waf_cooldown()
+
+            response = self.session.post(
+                url,
+                json=encrypt_json(body),
+                headers={
+                    "X-Tenant-Host": host,
+                    "Accept": "application/json",
+                },
+                timeout=settings.REQUEST_TIMEOUT,
             )
 
-        return decrypt_json(response.json())
+            try:
+                waf_action = (
+                    response.headers.get("x-amzn-waf-action", "").strip().lower()
+                )
+
+                if response.status_code == 202 and waf_action == "challenge":
+                    if attempt == len(WAF_COOLDOWNS):
+                        # Protect other workers even when this page gives up.
+                        _extend_waf_cooldown(WAF_COOLDOWNS[-1])
+                        raise ValueError(
+                            f"{url}: WAF challenge persisted after "
+                            f"{attempt + 1} attempts"
+                        )
+
+                    cooldown = WAF_COOLDOWNS[attempt]
+                    _extend_waf_cooldown(cooldown)
+
+                    logger.warning(
+                        "WAF challenge: host=%s, page=%s; shared cooldown "
+                        "at least %ss before retry %s/%s",
+                        host,
+                        body.get("page"),
+                        cooldown,
+                        attempt + 1,
+                        len(WAF_COOLDOWNS),
+                    )
+                    continue
+
+                if response.status_code != 200:
+                    logger.warning(
+                        "Unexpected API response: host=%s, page=%s, "
+                        "status=%s, content_type=%r, waf_action=%r",
+                        host,
+                        body.get("page"),
+                        response.status_code,
+                        response.headers.get("Content-Type"),
+                        waf_action,
+                    )
+                    response.raise_for_status()
+                    raise ValueError(
+                        f"{url} returned unexpected HTTP " f"{response.status_code}"
+                    )
+
+                content_type = response.headers.get("Content-Type", "")
+                if "application/json" not in content_type.lower():
+                    raise ValueError(
+                        f"{url} returned a non-JSON response " f"({content_type})"
+                    )
+
+                payload = decrypt_json(response.json())
+
+                if attempt:
+                    logger.info(
+                        "API request recovered after WAF cooldown: "
+                        "host=%s, page=%s, attempts=%s",
+                        host,
+                        body.get("page"),
+                        attempt + 1,
+                    )
+
+                return payload
+            finally:
+                response.close()
+
+        raise ValueError(f"{url}: WAF retry attempts exhausted")
 
     def _image_url(self, filename: str) -> str | None:
         """Build a `gallery_md` CDN URL from the bare filename the API returns"""
