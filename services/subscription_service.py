@@ -4,6 +4,7 @@ import logging
 import secrets
 import uuid
 from datetime import timedelta
+from urllib.parse import urlsplit
 
 from config.database import DatabaseManager
 from config.settings import settings
@@ -19,7 +20,9 @@ class SubscriptionService:
     def _get_active_subscription(cursor, token: str, buyer_domain: str) -> dict:
         """Resolve the newest active subscription for a domain, validating the token"""
         cursor.execute(
-            """SELECT id, token, expires_at FROM api_subscriptions
+            """SELECT id, token, expires_at,
+                   COALESCE(NULLIF(platform, ''), 'wordpress') AS platform
+            FROM api_subscriptions
             WHERE buyer_domain = %s AND expires_at > NOW()
             ORDER BY created_at DESC LIMIT 1""",
             (buyer_domain,),
@@ -33,10 +36,30 @@ class SubscriptionService:
 
     @staticmethod
     def create_subscription(
-        buyer_name: str, buyer_domain: str, phone_number: str
+        buyer_name: str,
+        buyer_domain: str,
+        phone_number: str,
+        platform: str = "wordpress",
     ) -> dict:
         """Create a new subscription and generate its token"""
         buyer_domain = buyer_domain.rstrip("/")
+        if platform not in {"wordpress", "shopify"}:
+            raise ValueError("Unsupported subscriber platform")
+        if platform == "shopify":
+            domain = urlsplit(buyer_domain)
+            if (
+                domain.scheme != "https"
+                or not (domain.hostname or "").endswith(".myshopify.com")
+                or domain.path
+                or domain.query
+                or domain.fragment
+                or domain.port
+                or domain.username
+                or domain.password
+            ):
+                raise ValueError(
+                    "Shopify buyer_domain must be its canonical HTTPS myshopify.com URL"
+                )
         token = str(uuid.uuid4())
         created_at = now()
         expires_at = created_at + timedelta(days=settings.SUBSCRIPTION_DAYS)
@@ -45,8 +68,8 @@ class SubscriptionService:
             cursor = conn.cursor(dictionary=True)
             cursor.execute(
                 """INSERT INTO api_subscriptions
-                (token, buyer_name, buyer_domain, phone_number, created_at, expires_at)
-                VALUES (%s, %s, %s, %s, %s, %s)""",
+                (token, buyer_name, buyer_domain, phone_number, created_at, expires_at, platform)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                 (
                     token,
                     buyer_name,
@@ -54,6 +77,7 @@ class SubscriptionService:
                     phone_number,
                     created_at,
                     expires_at,
+                    platform,
                 ),
             )
             subscription_id = cursor.lastrowid
@@ -62,6 +86,7 @@ class SubscriptionService:
 
         return {
             "subscription_id": subscription_id,
+            "platform": platform,
             "token": token,
             "buyer_name": buyer_name,
             "buyer_domain": buyer_domain,
@@ -200,6 +225,7 @@ class SubscriptionService:
 
         return {
             "expires_at": subscription["expires_at"].isoformat(),
+            "platform": subscription["platform"],
             "selected_stores": [
                 {
                     "store_id": s["store_id"],

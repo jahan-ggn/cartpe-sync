@@ -12,6 +12,7 @@ from mysql.connector import Error as MySQLError
 from config.database import DatabaseManager
 from config.settings import settings
 from utils.timeutil import now
+from services.shopify_delivery import deliver_shopify_csv
 
 logger = logging.getLogger(__name__)
 
@@ -207,11 +208,11 @@ class CSVService:
                 try:
                     cursor.execute(
                         """SELECT w.consumer_key, w.consumer_secret,
-                                  s.buyer_domain
-                        FROM woocommerce_credentials w
-                        JOIN api_subscriptions s
+                                  s.buyer_domain, COALESCE(NULLIF(s.platform, ''), 'wordpress') AS platform
+                        FROM api_subscriptions s
+                        LEFT JOIN woocommerce_credentials w
                             ON s.id = w.subscription_id
-                        WHERE w.subscription_id = %s
+                        WHERE s.id = %s
                             AND s.expires_at > NOW()""",
                         (subscription_id,),
                     )
@@ -224,6 +225,15 @@ class CSVService:
                     f"No active subscription with credentials found: "
                     f"{subscription_id}"
                 )
+
+            if row["platform"] == "shopify":
+                return deliver_shopify_csv(
+                    csv_path, subscription_id, row["buyer_domain"]
+                )
+            if row["platform"] != "wordpress":
+                raise ValueError("Unsupported subscriber platform")
+            if not row["consumer_key"] or not row["consumer_secret"]:
+                raise ValueError("WordPress credentials are not configured")
 
             api_url = (
                 f"{row['buyer_domain'].rstrip('/')}" "/wp-json/product-sync/v1/products"
@@ -257,9 +267,14 @@ class CSVService:
             csv.Error,
             requests.RequestException,
         ) as e:
-            logger.error(
-                f"Error uploading CSV for subscription {subscription_id}: "
-                f"{type(e).__name__}"
+            # logger.error(
+            #     f"Error uploading CSV for subscription {subscription_id}: "
+            #     f"{type(e).__name__}"
+            # )
+
+            logger.exception(
+                "Error uploading CSV for subscription %s",
+                subscription_id,
             )
             return False
 

@@ -1,6 +1,7 @@
 """Subscription routes"""
 
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from mysql.connector import Error as MySQLError
@@ -20,6 +21,7 @@ class SubscriptionCreateRequest(BaseModel):
     buyer_name: str
     buyer_domain: str
     phone_number: str
+    platform: Literal["wordpress", "shopify"] = "wordpress"
 
     @field_validator("phone_number")
     @classmethod
@@ -60,6 +62,7 @@ async def register_subscription(request: SubscriptionCreateRequest) -> dict:
             buyer_name=request.buyer_name,
             buyer_domain=request.buyer_domain,
             phone_number=request.phone_number,
+            platform=request.platform,
         )
         return {"success": True, "data": subscription}
     except ValueError as e:
@@ -123,7 +126,7 @@ async def get_subscription_status(request: SubscriptionStatusRequest) -> dict:
     "/subscriptions/push/{subscription_id}",
     dependencies=[Depends(require_admin)],
 )
-async def manual_push(subscription_id: int) -> dict:
+def manual_push(subscription_id: int) -> dict:
     """Generate and upload a CSV for one subscriber."""
     try:
         csv_path = CSVService.generate_csv_for_subscription(subscription_id)
