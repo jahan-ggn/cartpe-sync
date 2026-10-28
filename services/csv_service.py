@@ -56,12 +56,14 @@ class CSVService:
                 cursor = conn.cursor(dictionary=True)
                 try:
                     cursor.execute(
-                        """SELECT id
+                        """SELECT id,
+                                  COALESCE(NULLIF(platform, ''), 'wordpress') AS platform
                         FROM api_subscriptions
                         WHERE id = %s AND expires_at > NOW()""",
                         (subscription_id,),
                     )
-                    if cursor.fetchone() is None:
+                    subscription = cursor.fetchone()
+                    if subscription is None:
                         logger.warning(
                             "No active subscription found: %s",
                             subscription_id,
@@ -138,7 +140,9 @@ class CSVService:
                 finally:
                     cursor.close()
 
-            if not products:
+            # A signed, header-only Shopify snapshot means all subscribed
+            # inventory is unavailable. WordPress keeps its existing behavior.
+            if not products and subscription["platform"] != "shopify":
                 logger.info(
                     "Skipping CSV export for subscription %s: "
                     "no exportable products",
@@ -193,14 +197,12 @@ class CSVService:
     def upload_csv(csv_path: str, subscription_id: int) -> bool:
         """Upload only the inventory CSV."""
         try:
-            # Do not upload an empty or header-only CSV.
+            # Only a complete inventory header can represent an empty snapshot.
+            # Zero-byte/malformed files must never trigger inventory clearing.
             with open(csv_path, "r", newline="", encoding="utf-8") as csv_file:
                 reader = csv.DictReader(csv_file)
-                if next(reader, None) is None:
-                    logger.info(
-                        f"Skipping upload for subscription {subscription_id}: "
-                        "CSV contains no product rows"
-                    )
+                has_rows = next(reader, None) is not None
+                if not has_rows and reader.fieldnames != FIELD_NAMES:
                     return False
 
             with DatabaseManager.get_connection() as conn:
@@ -225,6 +227,13 @@ class CSVService:
                     f"No active subscription with credentials found: "
                     f"{subscription_id}"
                 )
+
+            if not has_rows and row["platform"] != "shopify":
+                logger.info(
+                    "Skipping upload for subscription %s: CSV contains no product rows",
+                    subscription_id,
+                )
+                return False
 
             if row["platform"] == "shopify":
                 return deliver_shopify_csv(
@@ -267,14 +276,15 @@ class CSVService:
             csv.Error,
             requests.RequestException,
         ) as e:
-            # logger.error(
-            #     f"Error uploading CSV for subscription {subscription_id}: "
-            #     f"{type(e).__name__}"
-            # )
-
-            logger.exception(
-                "Error uploading CSV for subscription %s",
+            # Requests exceptions can include URLs containing WooCommerce keys.
+            # Log only structured metadata, never the exception or traceback.
+            response = getattr(e, "response", None)
+            status = getattr(response, "status_code", None)
+            logger.error(
+                "Error uploading CSV for subscription %s: %s (HTTP status: %s)",
                 subscription_id,
+                type(e).__name__,
+                status if isinstance(status, int) else "unavailable",
             )
             return False
 
