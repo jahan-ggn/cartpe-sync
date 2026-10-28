@@ -1,5 +1,6 @@
 """FastAPI application for CartPE Sync"""
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -11,6 +12,7 @@ from api.routes import (
     subscriptions_router,
 )
 from config.settings import validate_settings
+from services.shopify_delivery_queue import retry_pending_deliveries
 from utils.logger import setup_logger
 
 setup_logger("api")
@@ -20,7 +22,24 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_settings()
-    yield
+
+    async def retry_shopify():
+        while True:
+            try:
+                await asyncio.to_thread(retry_pending_deliveries)
+            except Exception as error:
+                logger.error("Shopify retry maintenance deferred: %s", type(error).__name__)
+            await asyncio.sleep(5)
+
+    retries = asyncio.create_task(retry_shopify())
+    try:
+        yield
+    finally:
+        retries.cancel()
+        try:
+            await retries
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(

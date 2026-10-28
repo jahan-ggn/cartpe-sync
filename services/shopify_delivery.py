@@ -5,16 +5,16 @@ import hmac
 import logging
 import os
 import time
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlsplit
-from uuid import NAMESPACE_URL, uuid5
 
 import requests
 
 logger = logging.getLogger(__name__)
 
 
-def deliver_shopify_csv(csv_path: str, subscription_id: int, buyer_domain: str) -> bool:
+def _configuration(buyer_domain: str):
     endpoint = os.getenv("SHOPIFY_SYNC_URL", "").strip()
     secret_hex = os.getenv("SOURCE_WEBHOOK_SECRET", "").strip()
     target = urlsplit(endpoint)
@@ -55,15 +55,30 @@ def deliver_shopify_csv(csv_path: str, subscription_id: int, buyer_domain: str) 
         raise ValueError(
             "Shopify buyer_domain must be its canonical HTTPS myshopify.com URL"
         )
+    return endpoint, secret_hex, shop
+
+
+class DeliveryDeferred(Exception):
+    def __init__(self, retry_after: float = 60):
+        self.retry_after = max(1, retry_after)
+        super().__init__("Shopify CSV retained for automatic retry")
+
+
+def _retry_after(value):
+    try:
+        seconds = int(value)
+        return seconds if seconds >= 0 else None
+    except (TypeError, ValueError):
+        try:
+            return max(0, parsedate_to_datetime(value).timestamp() - time.time())
+        except (TypeError, ValueError, OverflowError, AttributeError):
+            return None
+
+
+def _send(csv_path: str, subscription_id: int, buyer_domain: str,
+          delivery_id: str, generated: str, content_hash: str) -> bool:
+    endpoint, secret_hex, shop = _configuration(buyer_domain)
     path = Path(csv_path)
-    # The filename includes the export UUID. Reusing this file reuses its delivery ID.
-    delivery_id = str(uuid5(NAMESPACE_URL, f"cartpe:{subscription_id}:{path.name}"))
-    generated = str(path.stat().st_mtime_ns // 1_000_000)
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    content_hash = digest.hexdigest()
     for attempt in range(3):
         timestamp = str(int(time.time()))
         message = "\n".join(
@@ -100,11 +115,11 @@ def deliver_shopify_csv(csv_path: str, subscription_id: int, buyer_domain: str) 
             ) as response:
                 if response.status_code in {200, 202}:
                     result = response.json()
-                    return (
-                        isinstance(result, dict)
-                        and result.get("success") is True
-                        and isinstance(result.get("jobId"), str)
-                    )
+                    if (isinstance(result, dict)
+                            and result.get("success") is True
+                            and isinstance(result.get("jobId"), str)):
+                        return True
+                    raise DeliveryDeferred()
                 logger.warning(
                     "Shopify delivery for subscription %s returned HTTP %s",
                     subscription_id,
@@ -112,9 +127,20 @@ def deliver_shopify_csv(csv_path: str, subscription_id: int, buyer_domain: str) 
                 )
                 if response.status_code not in {409, 429, 500, 502, 503, 504}:
                     return False
+                wait = _retry_after(response.headers.get("Retry-After"))
+                if wait is not None:
+                    # Persist the due time instead of holding an API request open.
+                    raise DeliveryDeferred(wait)
         except (requests.RequestException, ValueError):
             # A lost response is retried with the same delivery ID and CSV hash.
             pass
         if attempt < 2:
             time.sleep(2 ** (attempt + 1))
-    return False
+    raise DeliveryDeferred()
+
+
+def deliver_shopify_csv(csv_path: str, subscription_id: int, buyer_domain: str) -> bool:
+    # Validate configuration before retaining any delivery.
+    _configuration(buyer_domain)
+    from services.shopify_delivery_queue import submit_delivery
+    return submit_delivery(csv_path, subscription_id, buyer_domain)

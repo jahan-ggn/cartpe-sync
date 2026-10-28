@@ -4,12 +4,14 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from mysql.connector import Error as MySQLError
 from pydantic import BaseModel, field_validator
 
 from api.deps import require_admin
 from config.database import DatabaseManager
 from services.csv_service import CSVService
+from services.shopify_delivery_queue import delivery_is_pending
 from services.subscription_service import SubscriptionService
 from utils.timeutil import parse_date
 
@@ -144,6 +146,14 @@ def manual_push(subscription_id: int) -> dict:
         )
 
     if not CSVService.upload_csv(csv_path, subscription_id):
+        if delivery_is_pending(csv_path, subscription_id):
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "success": True, "queued": True,
+                    "message": f"CSV retained for automatic retry for subscription {subscription_id}",
+                },
+            )
         raise HTTPException(
             status_code=500,
             detail="CSV upload failed",

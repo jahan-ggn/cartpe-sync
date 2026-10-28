@@ -6,6 +6,7 @@ from mysql.connector import Error as MySQLError
 
 from config.database import DatabaseManager
 from services.csv_service import CSVService
+from services.shopify_delivery_queue import delivery_is_pending
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class PushOrchestrator:
             "success": 0,
             "failed": 0,
             "skipped": 0,
+            "queued": 0,
         }
 
         for sub in subscriptions:
@@ -56,12 +58,16 @@ class PushOrchestrator:
             if CSVService.upload_csv(csv_path, subscription_id):
                 results["success"] += 1
                 logger.info(f"Uploaded CSV for {buyer_domain}")
+            elif delivery_is_pending(csv_path, subscription_id):
+                results["queued"] += 1
+                logger.info("CSV retained for automatic retry for subscription %s", subscription_id)
             else:
                 results["failed"] += 1
                 logger.error(f"Upload failed for {buyer_domain}")
 
         logger.info(
             f"Push completed: {results['success']} success, "
-            f"{results['failed']} failed, {results['skipped']} skipped"
+            f"{results['failed']} failed, {results['skipped']} skipped, "
+            f"{results['queued']} queued"
         )
         return results
