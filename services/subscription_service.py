@@ -5,14 +5,14 @@ import logging
 import re
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
 from mysql.connector import Error as MySQLError
 
 from config.database import DatabaseManager
 from config.settings import settings
-from utils.timeutil import now
+from utils.timeutil import APP_TIMEZONE, now
 
 logger = logging.getLogger(__name__)
 
@@ -342,3 +342,79 @@ class SubscriptionService:
                         cursor.fetchone()
                 finally:
                     cursor.close()
+
+    @staticmethod
+    def update_shopify_billing_expiry(
+        shop: str, token: str, expires_at: datetime | None
+    ) -> dict:
+        """Mirror a verified Shopify expiry; None revokes access immediately."""
+        if not isinstance(shop, str) or not isinstance(token, str):
+            raise TypeError("Shop and token must be strings")
+
+        shop = shop.strip().lower()
+
+        if not re.fullmatch(
+            r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com",
+            shop,
+        ):
+            raise ValueError("Use the shop's bare myshopify.com domain")
+
+        if not token or len(token) > 256:
+            raise ValueError("Invalid source credentials")
+
+        if expires_at is None:
+            expiry = now().replace(microsecond=0)
+        else:
+            if not isinstance(expires_at, datetime):
+                raise TypeError("Expiry must be a datetime or None")
+
+            if expires_at.utcoffset() is None:
+                raise ValueError("Expiry must include its timezone")
+
+            # Existing MySQL DATETIME columns and NOW() use Asia/Kolkata.
+            expiry = expires_at.astimezone(APP_TIMEZONE).replace(
+                tzinfo=None,
+                microsecond=0,
+            )
+
+        with DatabaseManager.get_connection() as conn:
+            cursor = conn.cursor(dictionary=True)
+
+            try:
+                cursor.execute(
+                    """SELECT id FROM api_subscriptions
+                       WHERE buyer_domain = %s AND token = %s
+                         AND platform = 'shopify'
+                       FOR UPDATE""",
+                    (f"https://{shop}", token),
+                )
+
+                subscription = cursor.fetchone()
+
+                if subscription is None:
+                    raise ValueError("Shopify source account not found")
+
+                cursor.execute(
+                    """UPDATE api_subscriptions SET expires_at = %s
+                       WHERE id = %s AND platform = 'shopify'""",
+                    (expiry, subscription["id"]),
+                )
+
+                conn.commit()
+
+                return {
+                    "subscription_id": subscription["id"],
+                    "shop": shop,
+                    "expires_at": expiry.isoformat(),
+                }
+
+            except MySQLError:
+                try:
+                    conn.rollback()
+                finally:
+                    raise RuntimeError(
+                        "Unable to update Shopify billing. Retry shortly."
+                    ) from None
+
+            finally:
+                cursor.close()
