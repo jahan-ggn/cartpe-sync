@@ -6,7 +6,14 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from mysql.connector import Error as MySQLError
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+)
 
 from api.deps import require_admin, require_shopify_provisioning
 from config.database import DatabaseManager
@@ -228,6 +235,55 @@ def provision_shopify(request: ShopifyProvisionRequest) -> JSONResponse:
             {
                 "success": False,
                 "error": "Unable to provision this shop. Retry shortly.",
+            },
+            status_code=503,
+            headers={
+                "Cache-Control": "no-store",
+                "Retry-After": "5",
+            },
+        )
+
+    return JSONResponse(
+        {"success": True, "data": result},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+class ShopifyBillingRequest(ShopifyProvisionRequest):
+    token: SecretStr = Field(min_length=1, max_length=256)
+
+    # Required even when null: omission must never revoke access.
+    expires_at: AwareDatetime | None = Field(...)
+
+
+@router.post(
+    "/subscriptions/shopify/billing",
+    dependencies=[Depends(require_shopify_provisioning)],
+)
+def update_shopify_billing(request: ShopifyBillingRequest) -> JSONResponse:
+    """The trusted app server must verify billing with Shopify before calling."""
+    try:
+        result = SubscriptionService.update_shopify_billing_expiry(
+            shop=request.shop,
+            token=request.token.get_secret_value(),
+            expires_at=request.expires_at,
+        )
+
+    except ValueError:
+        return JSONResponse(
+            {
+                "success": False,
+                "error": "Shopify source account not found.",
+            },
+            status_code=403,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    except (RuntimeError, MySQLError):
+        return JSONResponse(
+            {
+                "success": False,
+                "error": "Unable to update Shopify billing. Retry shortly.",
             },
             status_code=503,
             headers={
