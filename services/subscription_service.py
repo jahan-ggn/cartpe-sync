@@ -1,10 +1,14 @@
 """Subscription service for managing API subscriptions"""
 
+import hashlib
 import logging
+import re
 import secrets
 import uuid
 from datetime import timedelta
 from urllib.parse import urlsplit
+
+from mysql.connector import Error as MySQLError
 
 from config.database import DatabaseManager
 from config.settings import settings
@@ -235,3 +239,106 @@ class SubscriptionService:
                 for s in stores
             ],
         }
+
+    @staticmethod
+    def provision_shopify_subscription(shop: str) -> dict:
+        """Create an inactive Shopify account or reuse the existing account."""
+        if not isinstance(shop, str):
+            raise TypeError("Shop must be a string")
+
+        shop = shop.strip().lower()
+
+        if not re.fullmatch(
+            r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com",
+            shop,
+        ):
+            raise ValueError("Use the shop's bare myshopify.com domain")
+
+        buyer_domain = f"https://{shop}"
+        digest = hashlib.sha256(f"{settings.DB_NAME}:{shop}".encode()).hexdigest()
+        lock_name = f"sss:{digest[:60]}"
+
+        with DatabaseManager.get_connection() as conn:
+            cursor = conn.cursor(dictionary=True)
+            locked = False
+
+            try:
+                # Prevent concurrent requests from creating duplicate records.
+                cursor.execute(
+                    "SELECT GET_LOCK(%s, 5) AS acquired",
+                    (lock_name,),
+                )
+                lock = cursor.fetchone()
+
+                if not lock or lock["acquired"] != 1:
+                    raise TimeoutError("Shop provisioning is busy")
+
+                locked = True
+
+                cursor.execute(
+                    """SELECT id AS subscription_id, token, expires_at
+                       FROM api_subscriptions
+                       WHERE buyer_domain = %s AND platform = 'shopify'
+                       ORDER BY (expires_at > NOW()) DESC,
+                                created_at DESC, id DESC
+                       LIMIT 1 FOR UPDATE""",
+                    (buyer_domain,),
+                )
+                subscription = cursor.fetchone()
+                created = subscription is None
+
+                if created:
+                    token = str(uuid.uuid4())
+
+                    cursor.execute(
+                        """INSERT INTO api_subscriptions
+                           (token, buyer_name, buyer_domain, platform,
+                            phone_number, created_at, expires_at)
+                           VALUES (
+                               %s, %s, %s, 'shopify', NULL, NOW(), NOW()
+                           )""",
+                        (token, shop, buyer_domain),
+                    )
+
+                    # A new record starts expired. Shopify approval will
+                    # separately supply its verified trial or billing expiry.
+                    cursor.execute(
+                        """SELECT id AS subscription_id, token, expires_at
+                           FROM api_subscriptions
+                           WHERE id = %s""",
+                        (cursor.lastrowid,),
+                    )
+                    subscription = cursor.fetchone()
+
+                result = {
+                    **subscription,
+                    "shop": shop,
+                    "buyer_domain": buyer_domain,
+                    "platform": "shopify",
+                    "created": created,
+                    "expires_at": subscription["expires_at"].isoformat(),
+                }
+
+                # Make the record visible before another request gets the lock.
+                conn.commit()
+                return result
+
+            except (MySQLError, TimeoutError):
+                try:
+                    conn.rollback()
+                finally:
+                    # SQL errors can contain token values.
+                    raise RuntimeError(
+                        "Unable to provision Shopify account. Retry shortly."
+                    ) from None
+
+            finally:
+                try:
+                    if locked:
+                        cursor.execute(
+                            "SELECT RELEASE_LOCK(%s)",
+                            (lock_name,),
+                        )
+                        cursor.fetchone()
+                finally:
+                    cursor.close()

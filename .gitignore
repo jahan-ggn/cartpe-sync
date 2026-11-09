@@ -23,3 +23,5 @@ csv_exports/
 .DS_Store
 
 *.sql
+
+tests/
