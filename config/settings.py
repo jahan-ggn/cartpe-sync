@@ -27,6 +27,7 @@ class Settings:
 
     # API auth
     ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+    SHOPIFY_PROVISIONING_API_KEY = os.getenv("SHOPIFY_PROVISIONING_API_KEY", "")
 
     # Scraping
     REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))

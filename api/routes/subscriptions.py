@@ -6,9 +6,9 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from mysql.connector import Error as MySQLError
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from api.deps import require_admin
+from api.deps import require_admin, require_shopify_provisioning
 from config.database import DatabaseManager
 from services.csv_service import CSVService
 from services.shopify_delivery_queue import delivery_is_pending
@@ -150,7 +150,8 @@ def manual_push(subscription_id: int) -> dict:
             return JSONResponse(
                 status_code=202,
                 content={
-                    "success": True, "queued": True,
+                    "success": True,
+                    "queued": True,
                     "message": f"CSV retained for automatic retry for subscription {subscription_id}",
                 },
             )
@@ -197,3 +198,45 @@ async def extend_subscription(
             cursor.close()
 
     return {"success": True, "expires_at": request.expires_at}
+
+
+class ShopifyProvisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shop: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$",
+    )
+
+    @field_validator("shop", mode="before")
+    @classmethod
+    def normalize_shop(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
+
+
+@router.post(
+    "/subscriptions/shopify/provision",
+    dependencies=[Depends(require_shopify_provisioning)],
+)
+def provision_shopify(request: ShopifyProvisionRequest) -> JSONResponse:
+    """The app server must supply its authenticated Shopify shop domain."""
+    try:
+        result = SubscriptionService.provision_shopify_subscription(request.shop)
+    except RuntimeError:
+        return JSONResponse(
+            {
+                "success": False,
+                "error": "Unable to provision this shop. Retry shortly.",
+            },
+            status_code=503,
+            headers={
+                "Cache-Control": "no-store",
+                "Retry-After": "5",
+            },
+        )
+
+    return JSONResponse(
+        {"success": True, "data": result},
+        headers={"Cache-Control": "no-store"},
+    )
