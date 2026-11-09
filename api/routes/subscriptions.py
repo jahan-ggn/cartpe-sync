@@ -251,9 +251,8 @@ def provision_shopify(request: ShopifyProvisionRequest) -> JSONResponse:
 
 class ShopifyBillingRequest(ShopifyProvisionRequest):
     token: SecretStr = Field(min_length=1, max_length=256)
-
-    # Required even when null: omission must never revoke access.
     expires_at: AwareDatetime | None = Field(...)
+    checked_at: AwareDatetime = Field(...)
 
 
 @router.post(
@@ -267,6 +266,7 @@ def update_shopify_billing(request: ShopifyBillingRequest) -> JSONResponse:
             shop=request.shop,
             token=request.token.get_secret_value(),
             expires_at=request.expires_at,
+            checked_at=request.checked_at,
         )
 
     except ValueError:

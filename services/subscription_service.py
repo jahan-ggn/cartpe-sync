@@ -345,9 +345,12 @@ class SubscriptionService:
 
     @staticmethod
     def update_shopify_billing_expiry(
-        shop: str, token: str, expires_at: datetime | None
+        shop: str,
+        token: str,
+        expires_at: datetime | None,
+        checked_at: datetime,
     ) -> dict:
-        """Mirror a verified Shopify expiry; None revokes access immediately."""
+        """Save verified billing only when its check is newer."""
         if not isinstance(shop, str) or not isinstance(token, str):
             raise TypeError("Shop and token must be strings")
 
@@ -362,6 +365,15 @@ class SubscriptionService:
         if not token or len(token) > 256:
             raise ValueError("Invalid source credentials")
 
+        if not isinstance(checked_at, datetime):
+            raise TypeError("Billing check time must be a datetime")
+
+        if checked_at.utcoffset() is None:
+            raise ValueError("Billing check time must include its timezone")
+
+        checked = checked_at.astimezone(APP_TIMEZONE).replace(tzinfo=None)
+        checked = checked.replace(microsecond=(checked.microsecond // 1000) * 1000)
+
         if expires_at is None:
             expiry = now().replace(microsecond=0)
         else:
@@ -371,7 +383,6 @@ class SubscriptionService:
             if expires_at.utcoffset() is None:
                 raise ValueError("Expiry must include its timezone")
 
-            # Existing MySQL DATETIME columns and NOW() use Asia/Kolkata.
             expiry = expires_at.astimezone(APP_TIMEZONE).replace(
                 tzinfo=None,
                 microsecond=0,
@@ -382,7 +393,8 @@ class SubscriptionService:
 
             try:
                 cursor.execute(
-                    """SELECT id FROM api_subscriptions
+                    """SELECT id, shopify_billing_checked_at
+                       FROM api_subscriptions
                        WHERE buyer_domain = %s AND token = %s
                          AND platform = 'shopify'
                        FOR UPDATE""",
@@ -394,10 +406,18 @@ class SubscriptionService:
                 if subscription is None:
                     raise ValueError("Shopify source account not found")
 
+                previous = subscription["shopify_billing_checked_at"]
+
+                if previous is not None and checked <= previous:
+                    raise RuntimeError(
+                        "A newer billing check was already saved. Retry."
+                    )
+
                 cursor.execute(
-                    """UPDATE api_subscriptions SET expires_at = %s
+                    """UPDATE api_subscriptions
+                       SET expires_at = %s, shopify_billing_checked_at = %s
                        WHERE id = %s AND platform = 'shopify'""",
-                    (expiry, subscription["id"]),
+                    (expiry, checked, subscription["id"]),
                 )
 
                 conn.commit()
