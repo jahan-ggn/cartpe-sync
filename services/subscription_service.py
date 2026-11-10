@@ -393,7 +393,7 @@ class SubscriptionService:
 
             try:
                 cursor.execute(
-                    """SELECT id, shopify_billing_checked_at
+                    """SELECT id, expires_at, shopify_billing_checked_at
                        FROM api_subscriptions
                        WHERE buyer_domain = %s AND token = %s
                          AND platform = 'shopify'
@@ -409,9 +409,14 @@ class SubscriptionService:
                 previous = subscription["shopify_billing_checked_at"]
 
                 if previous is not None and checked <= previous:
-                    raise RuntimeError(
-                        "A newer billing check was already saved. Retry."
-                    )
+                    conn.commit()
+
+                    return {
+                        "subscription_id": subscription["id"],
+                        "shop": shop,
+                        "expires_at": subscription["expires_at"].isoformat(),
+                        "stale": checked < previous,
+                    }
 
                 cursor.execute(
                     """UPDATE api_subscriptions
